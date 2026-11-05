@@ -1,0 +1,15 @@
+{
+  "name": "panzer-kritzel",
+  "version": "1.0.0",
+  "description": "Panzer-Spiel im Kritzel-Stil: bis zu 4 Spieler, Bots, Gruppen-Einladungen",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

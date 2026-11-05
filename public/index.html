@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panzer-Kritzel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f7f1e1;
+    --ink: #2b2620;
+    --ink-soft: #6b6255;
+    --line: #e2d8c2;
+    --red: #e8594f; --blue: #4f86e8; --green: #4fb85a; --yellow: #f2c94c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--paper); color: var(--ink);
+    font-family: 'Patrick Hand', 'Comic Sans MS', cursive; font-size: 19px; }
+  #bg, #cv { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .hidden { display: none !important; }
+  .screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: auto; }
+
+  h1 { font-family: 'Gochi Hand', cursive; font-size: clamp(48px, 9vw, 96px); margin: 0; line-height: 1;
+    transform: rotate(-3deg); text-shadow: 3px 3px 0 var(--yellow); letter-spacing: 1px; }
+  h2 { font-family: 'Gochi Hand', cursive; font-size: 32px; margin: 0 0 10px; }
+
+  /* Kritzel-Kasten: unregelmäßige Ränder */
+  .sketch { background: #fffdf6; border: 3px solid var(--ink);
+    border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+    box-shadow: 5px 6px 0 rgba(43,38,32,.18); }
+  .btn { font: inherit; font-size: 21px; cursor: pointer; color: var(--ink); background: #fff;
+    border: 3px solid var(--ink); padding: 8px 20px; border-radius: 15px 225px 15px 255px / 255px 15px 225px 15px;
+    box-shadow: 3px 4px 0 var(--ink); transition: transform .08s ease, box-shadow .08s ease; }
+  .btn:hover { transform: translate(-1px,-1px) rotate(-1deg); box-shadow: 4px 5px 0 var(--ink); }
+  .btn:active { transform: translate(2px,3px); box-shadow: 1px 1px 0 var(--ink); }
+  .btn.primary { background: var(--yellow); }
+  .btn.green { background: #9fe0a0; }
+  .btn.small { font-size: 16px; padding: 3px 12px; box-shadow: 2px 3px 0 var(--ink); }
+  .btn:disabled { opacity: .45; cursor: default; transform: none; }
+  input.field { font: inherit; font-size: 26px; padding: 8px 14px; width: 100%; text-align: center;
+    border: 3px solid var(--ink); background: #fff; outline: none; color: var(--ink);
+    border-radius: 225px 15px 255px 15px / 15px 255px 15px 225px; }
+  input.field:focus { box-shadow: 0 0 0 4px var(--yellow); }
+
+  /* Login */
+  #login .card { padding: 34px 34px 28px; width: min(460px, 100%); text-align: center; display: flex; flex-direction: column; gap: 18px; }
+  #login .sub { color: var(--ink-soft); margin-top: -6px; }
+  #login h1 { font-size: clamp(40px, 8vw, 64px); }
+
+  /* Lobby */
+  #lobby { align-items: flex-start; }
+  .lobby-wrap { width: min(1040px, 100%); margin: auto; display: grid; grid-template-columns: 1.55fr 1fr; gap: 22px; }
+  .lobby-head { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .lobby-head h1 { font-size: clamp(40px, 6vw, 64px); }
+  .hello { font-size: 22px; }
+  .hello b { background: var(--yellow); padding: 0 6px; border-radius: 6px; }
+  .panel { padding: 20px 22px; }
+  .slots { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 16px; }
+  .slot { position: relative; padding: 10px 10px 12px; text-align: center; min-height: 150px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    border: 3px dashed var(--ink-soft); border-radius: 20px 6px 24px 8px / 8px 24px 6px 20px; background: rgba(255,255,255,.5); }
+  .slot.full { border-style: solid; border-color: var(--ink); background: #fff; animation: pop .25s ease-out; }
+  @keyframes pop { from { transform: scale(.92) rotate(-2deg); opacity: .4; } to { transform: none; opacity: 1; } }
+  .slot canvas { width: 96px; height: 70px; }
+  .slot .nm { font-size: 22px; font-weight: bold; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slot .tag { font-size: 15px; color: var(--ink-soft); }
+  .slot .kick { position: absolute; top: 6px; right: 8px; border: none; background: none; font: inherit; font-size: 22px; cursor: pointer; color: var(--ink-soft); }
+  .slot .kick:hover { color: var(--red); }
+  .slot .empty { color: var(--ink-soft); font-size: 18px; }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .actions .grow { flex: 1; }
+  .hint { color: var(--ink-soft); font-size: 17px; margin-top: 12px; }
+  .online-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow-y: auto; }
+  .online-list li { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 2px dotted var(--line); }
+  .online-list .dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink); flex: none; }
+  .online-list .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 20px; }
+  .online-list .st { font-size: 14px; color: var(--ink-soft); }
+  .nobody { color: var(--ink-soft); text-align: center; padding: 14px 4px; }
+  .controls { grid-column: 1 / -1; padding: 12px 20px; display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; font-size: 18px; }
+  .controls span b { display: inline-block; border: 2px solid var(--ink); border-radius: 6px; padding: 0 6px; background: #fff; margin-right: 4px; }
+  .pu { display: inline-block; width: 22px; height: 22px; line-height: 18px; text-align: center; border: 2px solid var(--ink); border-radius: 5px; font-weight: bold; margin-right: 3px; }
+
+  /* Einladung */
+  #invite { position: fixed; inset: 0; background: rgba(43,38,32,.35); display: flex; align-items: center; justify-content: center; z-index: 30; padding: 16px; }
+  #invite .card { padding: 26px 30px; text-align: center; width: min(420px, 100%); animation: wiggle .5s ease-out; }
+  @keyframes wiggle { 0% { transform: scale(.7) rotate(-6deg); } 60% { transform: scale(1.04) rotate(2deg); } 100% { transform: none; } }
+  #invite .big { font-size: 26px; margin: 8px 0 18px; }
+
+  /* Toasts */
+  #toasts { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; align-items: center; z-index: 40; pointer-events: none; }
+  .toast { background: #fffdf6; border: 2px solid var(--ink); padding: 6px 16px; border-radius: 12px 4px 14px 5px; box-shadow: 3px 3px 0 rgba(0,0,0,.2); animation: tin .25s ease-out; }
+  @keyframes tin { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  /* Spiel-HUD */
+  #hud { position: fixed; top: 8px; left: 10px; right: 10px; display: flex; justify-content: space-between; align-items: flex-start; pointer-events: none; gap: 10px; }
+  #score { display: flex; gap: 8px; flex-wrap: wrap; }
+  .sc { background: rgba(255,253,246,.92); border: 2px solid var(--ink); border-radius: 10px 4px 12px 4px; padding: 1px 10px; font-size: 18px; display: flex; align-items: center; gap: 6px; }
+  .sc.me { box-shadow: 0 0 0 3px var(--yellow); }
+  .sc .dot { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--ink); }
+  #feed { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 17px; }
+  #feed div { background: rgba(255,253,246,.9); border: 2px solid var(--ink); border-radius: 8px; padding: 0 8px; }
+  #quit { position: fixed; bottom: 10px; right: 12px; pointer-events: auto; }
+  #banner { position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%) rotate(-2deg); text-align: center; pointer-events: none; padding: 18px 34px; }
+  #banner .t { font-family: 'Gochi Hand', cursive; font-size: clamp(34px, 6vw, 60px); }
+  #banner .s { color: var(--ink-soft); }
+  #mypu { position: fixed; bottom: 12px; left: 12px; display: flex; gap: 8px; pointer-events: none; }
+  #mypu div { background: rgba(255,253,246,.92); border: 2px solid var(--ink); border-radius: 8px; padding: 0 8px; font-size: 17px; }
+
+  @media (max-width: 760px) {
+    .lobby-wrap { grid-template-columns: 1fr; }
+    .slot canvas { width: 80px; height: 58px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+
+<!-- 1) Name wählen -->
+<div id="login" class="screen">
+  <div class="card sketch">
+    <h1>Panzer&#8209;Kritzel</h1>
+    <div class="sub">Wähle deinen Namen, dann lad deine Freunde ein!</div>
+    <input id="nameInput" class="field" maxlength="14" placeholder="Dein Name" autocomplete="off">
+    <button id="btnLogin" class="btn primary">Los geht's! ✏️</button>
+    <div id="loginErr" class="hint"></div>
+  </div>
+</div>
+
+<!-- 2) Lobby -->
+<div id="lobby" class="screen hidden">
+  <div class="lobby-wrap">
+    <div class="lobby-head">
+      <h1>Panzer&#8209;Kritzel</h1>
+      <div class="hello">Hallo <b id="myName"></b>! <button id="btnRename" class="btn small">Name ändern</button></div>
+    </div>
+
+    <div class="panel sketch">
+      <h2 id="groupTitle">Deine Gruppe</h2>
+      <div id="slots" class="slots"></div>
+      <div class="actions">
+        <button id="btnStart" class="btn primary">Spiel starten 🚀</button>
+        <button id="btnLeave" class="btn small">Gruppe verlassen</button>
+        <span class="grow"></span>
+      </div>
+      <div id="groupHint" class="hint"></div>
+    </div>
+
+    <div class="panel sketch">
+      <h2>Online 🟢</h2>
+      <ul id="online" class="online-list"></ul>
+      <div class="hint">Freunde sehen dich hier, sobald sie dieselbe Seite öffnen.
+        <br><button id="btnCopy" class="btn small" style="margin-top:8px">Link kopieren 🔗</button></div>
+    </div>
+
+    <div class="controls sketch">
+      <span><b>WASD</b>/<b>Pfeile</b> fahren</span>
+      <span><b>Maus</b> zielen</span>
+      <span><b>Klick</b>/<b>Leertaste</b> schießen</span>
+      <span><span class="pu" style="background:#ffb4a8">F</span>Feuer</span>
+      <span><span class="pu" style="background:#b6d8ff">S</span>Schild</span>
+      <span><span class="pu" style="background:#fff09a">T</span>Tempo</span>
+      <span>🌀 Teleporter · 🌳 Büsche verstecken</span>
+    </div>
+  </div>
+</div>
+
+<!-- 3) Spiel -->
+<div id="game" class="hidden">
+  <canvas id="cv"></canvas>
+  <div id="hud"><div id="score"></div><div id="feed"></div></div>
+  <div id="mypu"></div>
+  <div id="banner" class="sketch hidden"><div class="t"></div><div class="s"></div></div>
+  <button id="quit" class="btn small">Verlassen</button>
+</div>
+
+<!-- Einladung -->
+<div id="invite" class="hidden">
+  <div class="card sketch">
+    <h2>Einladung! ✉️</h2>
+    <div class="big"><b id="invFrom"></b> lädt dich in die Gruppe ein.</div>
+    <div class="actions" style="justify-content:center">
+      <button id="btnAccept" class="btn green">Annehmen</button>
+      <button id="btnDecline" class="btn small">Nein danke</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script src="client.js"></script>
+</body>
+</html>
