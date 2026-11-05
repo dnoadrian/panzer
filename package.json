@@ -1,7 +1,7 @@
 {
-  "name": "panzer-kritzel",
+  "name": "panzer",
   "version": "1.0.0",
-  "description": "Panzer-Spiel im Kritzel-Stil: bis zu 4 Spieler, Bots, Gruppen-Einladungen",
+  "description": "Panzer Battle Royale im Kritzel-Stil",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

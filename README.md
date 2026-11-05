@@ -1,34 +1,24 @@
-# Panzer-Kritzel 🖍️
+# Panzer
 
-Panzer-Spiel im Kritzel-Stil aus der Vogelperspektive – bis zu 4 Spieler (Freunde und/oder Bots).
+Battle Royale mit Panzern im Kritzel-Stil, aus der Vogelperspektive.
 
-## So funktioniert's
-1. Seite öffnen → **Namen wählen**
-2. In der Lobby siehst du rechts, wer **online** ist → **Einladen** klicken
-3. Dein Freund bekommt ein Popup → **Annehmen**
-4. Freie Plätze mit **+ Bot** füllen (oder leer lassen)
-5. Der Chef 👑 klickt **Spiel starten** – wer zuerst 10 Treffer hat, gewinnt
-
-**Steuerung:** WASD/Pfeile fahren · Maus zielen · Klick/Leertaste schießen
-**Karte:** Berge (blocken, Kugeln prallen ab) · Büsche (verstecken dich) · Teleporter (gleiche Farbe = verbunden)
-**Powerups:** F = Feuer (schnell schießen) · S = Schild · T = Tempo
+- Freunde per Name hinzufügen, in die Party einladen (bis 4), zusammen als Team spielen
+- Matchmaking füllt mit Bots auf (12 Panzer, bei 4er-Teams 16)
+- Zone schrumpft in 5 Stufen, das letzte Team gewinnt
+- Berge sind befahrbar: oben bist du vor Schüssen von unten geschützt
+- In Büschen ist man unsichtbar; um hineinzutreffen, muss der Busch erst zerschossen werden
+- Kisten: Reparatur, Schnellfeuer, Tempo, Kanone+, Doppelschuss
+- Level, XP und Lackierungen im Spind (im Browser gespeichert)
 
 ## Lokal starten
 ```
 npm install
 npm start
 ```
-Dann http://localhost:3000 öffnen (mehrere Tabs = mehrere Spieler zum Testen).
+http://localhost:3000 öffnen. Mehrere Spieler im selben Browser testen: `http://localhost:3000/?profil=2`
 
-## Auf Render.com hochladen
-1. Diesen Ordner in ein **GitHub-Repository** hochladen (ohne `node_modules`).
-2. Auf https://render.com einloggen → **New +** → **Web Service** → dein Repository auswählen.
-3. Einstellungen:
-   - **Runtime:** Node
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-   - **Instance Type:** Free
-4. **Create Web Service** – nach 1–2 Minuten bekommst du eine Adresse wie `https://panzer-kritzel.onrender.com`.
-5. Den Link an deine Freunde schicken – alle öffnen ihn, wählen einen Namen, und du lädst sie ein.
+Zum Testen mit schneller Zone: `PANZER_FAST=1 npm start`
 
-Hinweis: Der kostenlose Render-Plan schläft nach ca. 15 Minuten ohne Besucher ein. Beim ersten Öffnen danach dauert es bis zu einer Minute, bis die Seite lädt – einfach kurz warten.
+## Render.com
+Web Service, Build `npm install`, Start `node server.js`, Plan Free.
+Jeder Push auf `main` wird automatisch neu veröffentlicht.
