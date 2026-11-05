@@ -162,6 +162,8 @@
   #tutorial div { font-family: 'Gochi Hand', cursive; font-size: clamp(30px, 4.4vw, 54px); background: rgba(255,253,246,.94); border: 4px solid var(--ink);
     padding: 10px 28px; border-radius: var(--r1); box-shadow: 6px 7px 0 rgba(43,38,32,.25); animation: pop .35s ease-out; max-width: 90vw; }
 
+  #fps { position: absolute; left: 12px; bottom: 10px; font-size: 14px; color: var(--soft); pointer-events: none; }
+
   @media (max-width: 760px) {
     .topbar .logo { font-size: 34px; } .tabs { margin-left: 0; } .tab { font-size: 22px; } .lvl .bar, .lvl small { display: none; }
     #btnPlay { font-size: 42px; min-width: 220px; } #mini { width: 130px; height: 130px; } #feed { top: 150px; }
@@ -247,6 +249,7 @@
   </div>
   <div id="center"></div>
   <div id="tutorial"></div>
+  <div id="fps"></div>
   <div id="deathCard" class="overlay sketch hidden">
     <div class="t">Ausgeschieden</div>
     <div class="s" id="deathBy"></div>
@@ -266,5 +269,6 @@
 
 <script src="draw.js"></script>
 <script src="client.js"></script>
+<script src="game.js"></script>
 </body>
 </html>

@@ -11,7 +11,9 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // ================= Spielwerte =================
 const MAP = 2400;            // Kartengröße (Quadrat)
-const TR = 16;               // Panzer-Radius
+const TR = 16;               // Panzer-Radius (Kollision)
+const HIT_R = 21;            // Treffer-Radius (etwas großzügiger als der Panzer)
+const BLOCK_TIME = 1.2, BLOCK_CD = 7; // Blocken: Dauer und Abklingzeit
 const BR = 4;                // Kugel-Radius
 const MAX_HP = 100;
 const SPEED = 80;            // Grundtempo (langsam & taktisch)
@@ -357,7 +359,7 @@ function handle(c, msg) {
       const t = m.byId.get(c.pid); if (!t || !t.alive) return;
       t.input = {
         dx: clamp(+msg.dx || 0, -1, 1), dy: clamp(+msg.dy || 0, -1, 1),
-        aim: Number.isFinite(+msg.aim) ? +msg.aim : t.ta, fire: !!msg.fire,
+        aim: Number.isFinite(+msg.aim) ? +msg.aim : t.ta, fire: !!msg.fire, block: !!msg.block,
       };
       break;
     }
@@ -403,8 +405,8 @@ function makeTank(id, name, team, skin, bot) {
   return {
     id, name, team, skin, bot, x: 0, y: 0, a: 0, ta: 0, h: 0, vx: 0, vy: 0,
     hp: MAX_HP, alive: true, kills: 0, dmg: 0, cannon: 0,
-    rapidUntil: 0, speedUntil: 0, dblUntil: 0, revealUntil: 0, nextFire: 0, tpLock: -1,
-    input: { dx: 0, dy: 0, aim: 0, fire: false }, ai: bot ? newAI() : null,
+    rapidUntil: 0, speedUntil: 0, dblUntil: 0, revealUntil: 0, nextFire: 0, tpLock: -1, blockUntil: 0, blockReady: 0,
+    input: { dx: 0, dy: 0, aim: 0, fire: false, block: false }, ai: bot ? newAI() : null,
     place: 0, resultSent: false, killerId: null,
   };
 }
@@ -539,13 +541,19 @@ function collide(map, t) {
 function moveTank(m, t, now, dt) {
   const map = m.map, inp = t.input;
   const px = t.x, py = t.y;
+  // Blocken starten (nur wenn bereit)
+  if (inp.block && now >= t.blockReady) {
+    t.blockUntil = now + BLOCK_TIME; t.blockReady = now + BLOCK_TIME + BLOCK_CD;
+    m.events.push({ k: 'blockOn', x: t.x, y: t.y, i: t.id });
+  }
+  const blocking = now < t.blockUntil;
   const L = Math.hypot(inp.dx, inp.dy);
   if (L > 0.05) {
     const dx = inp.dx / L, dy = inp.dy / L;
     const h0 = heightAt(map, t.x, t.y), h1 = heightAt(map, t.x + dx * 6, t.y + dy * 6);
     const s = clamp((h1 - h0) / 6 * SLOPE_W, -1, 1);
     const f = s > 0 ? 1 - 0.55 * s : 1 - 0.3 * s; // bergauf langsamer, bergab schneller
-    const sp = SPEED * (now < t.speedUntil ? 1.45 : 1) * f;
+    const sp = SPEED * (now < t.speedUntil ? 1.45 : 1) * (blocking ? 0.6 : 1) * f;
     t.a = turnTo(t.a, Math.atan2(dy, dx), dt * 10);
     t.x += dx * sp * dt; t.y += dy * sp * dt;
     collide(map, t);
@@ -583,18 +591,19 @@ function moveTank(m, t, now, dt) {
   }
 
   // Schießen
-  if (inp.fire && now >= t.nextFire) {
+  if (inp.fire && now >= t.nextFire && !blocking) {
     t.nextFire = now + (now < t.rapidUntil ? RAPID_CD : FIRE_CD);
     t.revealUntil = now + REVEAL;
     const c = Math.cos(t.ta), s = Math.sin(t.ta), dmg = DMG[t.cannon], ob = bushAt(map, t.x, t.y);
     const offs = now < t.dblUntil ? [-7, 7] : [0];
     for (const o of offs) {
-      m.bullets.push({ x: t.x + c * (TR + 10) - s * o, y: t.y + s * (TR + 10) + c * o, vx: c * BSPEED, vy: s * BSPEED, owner: t.id, team: t.team, h: t.h, dmg, life: BLIFE, bush: ob });
+      m.bullets.push({ id: (bulletId = (bulletId + 1) % 1e6), x: t.x + c * (TR + 10) - s * o, y: t.y + s * (TR + 10) + c * o, vx: c * BSPEED, vy: s * BSPEED, owner: t.id, team: t.team, h: t.h, dmg, life: BLIFE, bush: ob });
     }
     m.events.push({ k: 'shot', x: t.x + c * (TR + 12), y: t.y + s * (TR + 12), a: t.ta, i: t.id });
   }
 }
 
+let bulletId = 0;
 function updateBullets(m, now, dt) {
   const map = m.map;
   for (const b of m.bullets) {
@@ -619,7 +628,11 @@ function updateBullets(m, now, dt) {
     if (!hit) {
       for (const t of m.tanks) {
         if (!t.alive || t.team === b.team) continue;
-        if (Math.hypot(t.x - b.x, t.y - b.y) < TR + BR) { damage(m, t, b, now); hit = true; break; }
+        if (Math.hypot(t.x - b.x, t.y - b.y) < HIT_R + BR) {
+          if (now < t.blockUntil) m.events.push({ k: 'block', x: b.x, y: b.y, v: t.id, by: b.owner });
+          else damage(m, t, b, now);
+          hit = true; break;
+        }
       }
     }
     if (hit) b.dead = true;
@@ -807,7 +820,17 @@ function botThink(m, t, now, dt) {
       aim = a; fire = Math.abs(normAngle(a - t.ta)) < 0.15;
     }
   }
-  t.input = { dx: move ? Math.cos(ang) : 0, dy: move ? Math.sin(ang) : 0, aim, fire };
+  // Blocken, wenn eine feindliche Kugel direkt auf den Bot zufliegt
+  let block = false;
+  if (now >= t.blockReady && Math.random() < 0.5) {
+    for (const b of m.bullets) {
+      if (b.team === t.team) continue;
+      const dx = t.x - b.x, dy = t.y - b.y, d = Math.hypot(dx, dy);
+      if (d > 110 || d < 1) continue;
+      if ((b.vx * dx + b.vy * dy) / (BSPEED * d) > 0.96) { block = true; break; }
+    }
+  }
+  t.input = { dx: move ? Math.cos(ang) : 0, dy: move ? Math.sin(ang) : 0, aim, fire, block };
 }
 
 function stepMatch(m, now, dt) {
@@ -869,18 +892,19 @@ function sendStates(m, now) {
       if (!t.alive) continue;
       if (t !== f && t.team !== me.team && (!near(t) || hiddenFrom(map, t, f, now))) continue;
       if (t.team === me.team && !near(t, 400)) continue;
-      tanks.push({ i: t.id, x: r1(t.x), y: r1(t.y), a: r1(t.a * 10) / 10, ta: r1(t.ta * 10) / 10, h: Math.round(t.h * 100) / 100, hp: Math.ceil(t.hp), sp: now < t.speedUntil ? 1 : 0, df: now < t.dblUntil ? 1 : 0, rf: now < t.rapidUntil ? 1 : 0 });
+      tanks.push({ i: t.id, x: r1(t.x), y: r1(t.y), a: r1(t.a * 10) / 10, ta: r1(t.ta * 10) / 10, h: Math.round(t.h * 100) / 100, hp: Math.ceil(t.hp), sp: now < t.speedUntil ? 1 : 0, df: now < t.dblUntil ? 1 : 0, rf: now < t.rapidUntil ? 1 : 0, bk: now < t.blockUntil ? 1 : 0 });
     }
     const ft = m.byId.get(f.id);
     send(c, {
-      t: 's', f: f.id, cd: r1(Math.max(0, m.startAt - now)),
+      t: 's', ts: Math.round(now * 1000), f: f.id, cd: r1(Math.max(0, m.startAt - now)),
       me: {
         hp: Math.ceil(Math.max(0, me.hp)), alive: me.alive, kills: me.kills, dmg: Math.round(me.dmg), k: me.cannon,
         rf: r1(Math.max(0, me.rapidUntil - now)), sp: r1(Math.max(0, me.speedUntil - now)), df: r1(Math.max(0, me.dblUntil - now)),
+        bk: now < me.blockUntil ? 1 : 0, bl: r1(Math.max(0, me.blockReady - now)), bcd: BLOCK_CD + BLOCK_TIME,
       },
       fk: ft ? ft.kills : 0,
       tanks,
-      b: m.bullets.filter(b => near(b)).map(b => [r1(b.x), r1(b.y), b.team === me.team ? 1 : 0]),
+      b: m.bullets.filter(b => near(b)).map(b => [b.id, r1(b.x), r1(b.y), b.team === me.team ? 1 : 0]),
       p: m.pickups.filter(p => near(p, 100)).map(p => [p.id, p.type, r1(p.x), r1(p.y)]),
       occ: occ.filter(i => near(map.bushes[i])),
       ev: m.events.filter(e => e.g || (e.x !== undefined && near(e, 150))),
