@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // ================= Spielwerte =================
-const MAP = 3400;            // Kartengröße (Quadrat)
+const MAP = 2600;            // Kartengröße (Quadrat) – gespielt wird auf einer Bergkuppe darin
 const TR = 16;               // Panzer-Radius (Kollision)
 const HIT_R = 21;            // Treffer-Radius (etwas großzügiger als der Panzer)
 const BLOCK_TIME = 1.2, BLOCK_CD = 7; // Blocken: Dauer und Abklingzeit
@@ -26,20 +26,21 @@ const FIRE_CD = 1.1;         // Sekunden zwischen zwei Schüssen
 const REGEN_DELAY = 5, REGEN = 6; // nach 5 s ohne Schaden repariert sich der Panzer
 const PARTY_MAX = 4;
 const VIEW_R = 1150;         // was ein Spieler vom Server gezeigt bekommt
-const BUS_WAIT = 4;          // Sekunden bis der Kampfbus losfliegt
-const BUS_DUR = 24;          // Flugdauer über die Karte
+const BUS_WAIT = 3;          // Sekunden bis der Kampfbus losfliegt
+const BUS_DUR = 14;          // Flugdauer über die Karte
 const DROP_TIME = 4;         // Fallschirm-Dauer
 const DROP_SPEED = 190;      // Steuern am Fallschirm
 const BUSH_HP = 1;           // ein Schuss und der Busch ist weg
 const HILL_BLOCK = 0.45;     // so viel höher darf der Hang sein, bevor er eine Kugel schluckt
 const REVEAL = 1.2;          // nach dem Schießen kurz sichtbar (auch im Busch)
 const FAST = process.env.PANZER_FAST === "1" ? 0.12 : 1; // nur zum Testen: Sturm/Bus viel schneller
+// Der Sturm ist ca. 1:30 nach dem Ende des Busflugs komplett zu
 const ZONE_PHASES = [
-  { wait: 40, shrink: 35, r: 1600, dps: 2 },
-  { wait: 35, shrink: 28, r: 950, dps: 4 },
-  { wait: 30, shrink: 22, r: 520, dps: 7 },
-  { wait: 25, shrink: 18, r: 230, dps: 11 },
-  { wait: 20, shrink: 18, r: 0, dps: 16 },
+  { wait: 12, shrink: 10, r: 880, dps: 3 },
+  { wait: 10, shrink: 9, r: 520, dps: 5 },
+  { wait: 8, shrink: 8, r: 290, dps: 8 },
+  { wait: 7, shrink: 7, r: 130, dps: 12 },
+  { wait: 6, shrink: 8, r: 0, dps: 18 },
 ].map(p => ({ ...p, wait: p.wait * FAST, shrink: p.shrink * FAST }));
 const BOT_SKINS = ['rot', 'blau', 'gruen', 'orange', 'lila', 'tuerkis', 'grau', 'pink'];
 const BOT_NAMES = ['Otto', 'Kalle', 'Gerd', 'Franz', 'Heinz', 'Rudi', 'Bruno', 'Lotte', 'Hilde', 'Emil', 'Fritz', 'Greta',
@@ -113,30 +114,57 @@ function rockAt(map, x, y, r) {
   return false;
 }
 
+// Umriss der Bergkuppe: Radius je Winkel (72 Stützpunkte)
+function makePlateau(rnd) {
+  const N = 140, base = MAP * 0.44, waves = [];
+  for (let i = 0; i < 5; i++) waves.push({ a: rnd() * 6.283, amp: (0.04 + rnd() * 0.05) / (i * 0.5 + 1), f: i + 2 });
+  for (let i = 0; i < 3; i++) waves.push({ a: rnd() * 6.283, amp: 0.008 + rnd() * 0.01, f: 13 + i * 9 }); // felsige Zacken
+  const r = [];
+  for (let i = 0; i < N; i++) {
+    const th = i / N * Math.PI * 2;
+    let k = 1;
+    for (const w of waves) k += w.amp * Math.sin(w.f * th + w.a);
+    k += (rnd() - 0.5) * 0.012;
+    r.push(Math.round(base * k));
+  }
+  return { cx: MAP / 2, cy: MAP / 2, r };
+}
+function plateauR(map, ang) {
+  const P = map.plateau, N = P.r.length;
+  let u = ang / (Math.PI * 2); u -= Math.floor(u); u *= N;
+  const i = Math.floor(u) % N, fr = u - Math.floor(u);
+  return P.r[i] + (P.r[(i + 1) % N] - P.r[i]) * fr;
+}
+function onPlateau(map, x, y, margin = 0) {
+  const P = map.plateau, dx = x - P.cx, dy = y - P.cy;
+  return Math.hypot(dx, dy) < plateauR(map, Math.atan2(dy, dx)) - margin;
+}
+
 function makeMap(seed) {
   const rnd = rng(seed);
   const R = (a, b) => a + (b - a) * rnd();
   const map = { size: MAP, hills: [], rocks: [], bushes: [], teleports: [] };
+  map.plateau = makePlateau(rnd);
   const far = (list, x, y, r, gap) => list.every(o => Math.hypot(o.x - x, o.y - y) > o.r + r + gap);
-  for (let i = 0; i < 800 && map.hills.length < 8; i++) {
-    const r = R(180, 280), x = R(r + 120, MAP - r - 120), y = R(r + 120, MAP - r - 120);
-    if (far(map.hills, x, y, r, 300)) map.hills.push({ x, y, r, p: r * 0.42 });
+  for (let i = 0; i < 1500 && map.hills.length < 6; i++) {
+    const r = R(170, 250), x = R(r, MAP - r), y = R(r, MAP - r);
+    if (onPlateau(map, x, y, r + 90) && far(map.hills, x, y, r, 260)) map.hills.push({ x, y, r, p: r * 0.42 });
   }
-  for (let i = 0; i < 4000 && map.rocks.length < 34; i++) {
+  for (let i = 0; i < 6000 && map.rocks.length < 24; i++) {
     const r = R(18, 42), x = R(60, MAP - 60), y = R(60, MAP - 60);
-    if (far(map.hills, x, y, r, 30) && far(map.rocks, x, y, r, 220)) map.rocks.push({ x, y, r });
+    if (onPlateau(map, x, y, r + 60) && far(map.hills, x, y, r, 30) && far(map.rocks, x, y, r, 200)) map.rocks.push({ x, y, r });
   }
   const tpColor = '#9a6cff';
-  for (let i = 0; i < 3000 && map.teleports.length < 2; i++) {
+  for (let i = 0; i < 20000 && map.teleports.length < 2; i++) {
     const x = R(150, MAP - 150), y = R(150, MAP - 150);
-    if (!far(map.hills, x, y, 20, 40) || !far(map.rocks, x, y, 20, 50)) continue;
-    if (map.teleports.length === 1 && Math.hypot(map.teleports[0].x - x, map.teleports[0].y - y) < 1900) continue;
+    if (!onPlateau(map, x, y, 160) || !far(map.hills, x, y, 20, 40) || !far(map.rocks, x, y, 20, 50)) continue;
+    if (map.teleports.length === 1 && Math.hypot(map.teleports[0].x - x, map.teleports[0].y - y) < 900) continue;
     map.teleports.push({ x, y, r: 20, color: tpColor, pair: map.teleports.length ? 0 : 1 });
   }
   if (map.teleports.length < 2) map.teleports = [];
-  for (let i = 0; i < 9000 && map.bushes.length < 55; i++) {
+  for (let i = 0; i < 9000 && map.bushes.length < 40; i++) {
     const r = R(32, 48), x = R(80, MAP - 80), y = R(80, MAP - 80);
-    if (far(map.hills, x, y, r, 10) && far(map.rocks, x, y, r, 25) && far(map.bushes, x, y, r, 110) && far(map.teleports, x, y, r, 40)) {
+    if (onPlateau(map, x, y, r + 50) && far(map.hills, x, y, r, 10) && far(map.rocks, x, y, r, 25) && far(map.bushes, x, y, r, 100) && far(map.teleports, x, y, r, 40)) {
       map.bushes.push({ x, y, r, hp: BUSH_HP });
     }
   }
@@ -374,6 +402,17 @@ function handle(c, msg) {
     case 'toLobby':
       leaveMatch(c, false);
       break;
+    case 'deleteAccount': {
+      // Freunde informieren, Anfragen entfernen, Verbindung trennen -> Name ist sofort wieder frei
+      for (const [pid] of c.friends) {
+        const o = byPid.get(pid);
+        if (o) { o.friends.delete(c.pid); send(o, { t: 'friendRemoved', pid: c.pid }); }
+      }
+      for (const o of byPid.values()) o.requests.delete(c.pid);
+      dropConn(c);
+      try { c.ws.close(); } catch { /* egal */ }
+      break;
+    }
   }
 }
 
@@ -388,7 +427,7 @@ function matchmake(now) {
   let n = 0;
   for (const id of queue) {
     const p = parties.get(id);
-    if (n + p.members.length > 12) break;
+    if (n + p.members.length > 8) break;
     chosen.push(p); n += p.members.length;
   }
   for (const p of chosen) unqueue(p);
@@ -411,20 +450,15 @@ function makeTank(id, name, team, skin, bot) {
 }
 
 // Flugroute des Kampfbusses: quer über die Karte, nicht genau durch die Mitte
-function makeBusRoute() {
-  const a = Math.random() * Math.PI * 2;
-  const off = (Math.random() - 0.5) * MAP * 0.4;
-  const cx = MAP / 2 + Math.cos(a + Math.PI / 2) * off, cy = MAP / 2 + Math.sin(a + Math.PI / 2) * off;
-  // Gerade durch (cx,cy) auf das Innere der Karte zuschneiden, damit niemand am Rand landen muss
-  const dx = Math.cos(a), dy = Math.sin(a), lo = 260, hi = MAP - 260;
-  let t0 = -1e9, t1 = 1e9;
-  for (const [p, d] of [[cx, dx], [cy, dy]]) {
-    if (Math.abs(d) < 1e-6) continue;
-    let ta = (lo - p) / d, tb = (hi - p) / d;
-    if (ta > tb) [ta, tb] = [tb, ta];
-    t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
-  }
-  return { x0: cx + dx * t0, y0: cy + dy * t0, x1: cx + dx * t1, y1: cy + dy * t1, a };
+function makeBusRoute(map) {
+  // Gerade quer über die Kuppe; Anfang und Ende liegen sicher über festem Boden
+  const a = Math.random() * Math.PI * 2, P = map.plateau;
+  const off = (Math.random() - 0.5) * MAP * 0.18;
+  const cx = P.cx + Math.cos(a + Math.PI / 2) * off, cy = P.cy + Math.sin(a + Math.PI / 2) * off;
+  const dx = Math.cos(a), dy = Math.sin(a);
+  const end = (sgn) => { let t = 0; while (t < MAP && onPlateau(map, cx + sgn * dx * (t + 10), cy + sgn * dy * (t + 10), 160)) t += 10; return t; };
+  const t0 = end(-1), t1 = end(1);
+  return { x0: cx - dx * t0, y0: cy - dy * t0, x1: cx + dx * t1, y1: cy + dy * t1, a };
 }
 function busPos(m, now) {
   const k = clamp((now - m.busStart) / m.busDur, 0, 1), r = m.bus;
@@ -435,12 +469,12 @@ function createMatch(chosen, now) {
   const seed = Math.floor(Math.random() * 1e9);
   const map = makeMap(seed);
   const teamSize = Math.max(...chosen.map(p => p.members.length));
-  const total = teamSize >= 4 ? 20 : 16;
+  const total = teamSize === 3 ? 9 : 8;
   const busDur = BUS_DUR * (FAST < 1 ? 0.4 : 1);
   const m = {
     id: uid('m'), map, tanks: [], byId: new Map(), bullets: [], events: [],
     humans: new Set(), humanList: [], over: false, endAt: 0, teamCount: 0, lastTick: now,
-    bus: makeBusRoute(), busStart: now + BUS_WAIT, busDur,
+    bus: makeBusRoute(map), busStart: now + BUS_WAIT, busDur,
   };
   m.busEnd = m.busStart + busDur;
   const names = BOT_NAMES.slice().sort(() => Math.random() - 0.5);
@@ -473,10 +507,10 @@ function createMatch(chosen, now) {
     if (t.bot) t.jumpAt = m.busStart + busDur * (0.08 + Math.random() * 0.84);
   }
   // Sturm: bedeckt am Anfang die ganze Karte, startet nach dem Bus
-  m.zone = { x: MAP / 2, y: MAP / 2, r: MAP * 0.72, tx: 0, ty: 0, tr: 0, phase: 0, stage: 'wait', until: m.busEnd + ZONE_PHASES[0].wait, fx: 0, fy: 0, fr: 0, s0: 0 };
-  setZoneTarget(m.zone, 0);
+  m.zone = { x: MAP / 2, y: MAP / 2, r: MAP * 0.58, tx: 0, ty: 0, tr: 0, phase: 0, stage: 'wait', until: m.busEnd + ZONE_PHASES[0].wait, fx: 0, fy: 0, fr: 0, s0: 0 };
+  setZoneTarget(m.zone, 0, map);
   matches.set(m.id, m);
-  const mapPayload = { size: MAP, hills: map.hills, rocks: map.rocks, bushes: map.bushes.map(b => ({ x: b.x, y: b.y, r: b.r, hp: b.hp })), teleports: map.teleports };
+  const mapPayload = { size: MAP, plateau: map.plateau, hills: map.hills, rocks: map.rocks, bushes: map.bushes.map(b => ({ x: b.x, y: b.y, r: b.r, hp: b.hp })), teleports: map.teleports };
   const roster = m.tanks.map(t => ({ id: t.id, name: t.name, team: t.team, skin: t.skin, bot: t.bot }));
   for (const pid of m.humans) {
     const c = byPid.get(pid), me = m.byId.get(pid);
@@ -485,14 +519,16 @@ function createMatch(chosen, now) {
   socialDirty = true;
 }
 
-function setZoneTarget(z, phase) {
-  const nr = ZONE_PHASES[phase].r;
+function setZoneTarget(z, phase, map) {
+  const nr = ZONE_PHASES[phase].r, P = map.plateau;
   const maxOff = Math.max(0, z.r - nr) * 0.7;
   const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * maxOff;
-  const margin = Math.min(MAP / 2, nr + 200);
-  z.tx = clamp(z.x + Math.cos(a) * d, margin, MAP - margin);
-  z.ty = clamp(z.y + Math.sin(a) * d, margin, MAP - margin);
-  z.tr = nr;
+  let tx = z.x + Math.cos(a) * d, ty = z.y + Math.sin(a) * d;
+  // Mitte des nächsten Kreises muss gut auf der Kuppe liegen
+  const ang = Math.atan2(ty - P.cy, tx - P.cx), lim = Math.max(0, plateauR(map, ang) * 0.85 - nr * 0.6);
+  const dd = Math.hypot(tx - P.cx, ty - P.cy);
+  if (dd > lim) { tx = P.cx + Math.cos(ang) * lim; ty = P.cy + Math.sin(ang) * lim; }
+  z.tx = tx; z.ty = ty; z.tr = nr;
 }
 function updateZone(m, now) {
   const z = m.zone;
@@ -507,7 +543,7 @@ function updateZone(m, now) {
     z.x = lerp(z.fx, z.tx, k); z.y = lerp(z.fy, z.ty, k); z.r = lerp(z.fr, z.tr, k);
     if (k >= 1) {
       z.phase++;
-      if (z.phase < ZONE_PHASES.length) { z.stage = 'wait'; z.until = now + ZONE_PHASES[z.phase].wait; setZoneTarget(z, z.phase); }
+      if (z.phase < ZONE_PHASES.length) { z.stage = 'wait'; z.until = now + ZONE_PHASES[z.phase].wait; setZoneTarget(z, z.phase, m.map); }
       else { z.stage = 'done'; z.until = now; }
     }
   }
@@ -528,7 +564,9 @@ function jump(m, t, now) {
   t.ph = 'drop'; t.dropT0 = now; t.x = clamp(p.x, 40, MAP - 40); t.y = clamp(p.y, 40, MAP - 40);
   if (t.bot) {
     const a = Math.random() * Math.PI * 2, d = Math.random() * 520;
-    t.goal = { x: clamp(t.x + Math.cos(a) * d, 120, MAP - 120), y: clamp(t.y + Math.sin(a) * d, 120, MAP - 120) };
+    let gx = t.x + Math.cos(a) * d, gy = t.y + Math.sin(a) * d;
+    for (let k = 0; k < 20 && !onPlateau(m.map, gx, gy, 150); k++) { gx = (gx + m.map.plateau.cx) / 2; gy = (gy + m.map.plateau.cy) / 2; }
+    t.goal = { x: gx, y: gy };
   }
   m.events.push({ k: 'jump', x: t.x, y: t.y, i: t.id });
 }
@@ -550,10 +588,16 @@ function updateAir(m, t, now, dt) {
   t.ta = t.bot ? t.a : turnTo(t.ta, t.input.aim, dt * 40);
   if (now - t.dropT0 >= DROP_TIME) {
     t.ph = 'ground'; t.landedAt = now; t.lastHurt = now;
+    if (!onPlateau(m.map, t.x, t.y)) { fall(m, t, now); return; }
     collide(m.map, t);
     t.h = heightAt(m.map, t.x, t.y);
     m.events.push({ k: 'land', x: t.x, y: t.y, i: t.id });
   }
+}
+
+function fall(m, t, now) {
+  m.events.push({ k: 'fall', x: t.x, y: t.y, a: t.a, i: t.id });
+  eliminate(m, t, null, 'fall', now);
 }
 
 function moveTank(m, t, now, dt) {
@@ -574,6 +618,7 @@ function moveTank(m, t, now, dt) {
     t.a = turnTo(t.a, Math.atan2(dy, dx), dt * 10);
     t.x += dx * sp * dt; t.y += dy * sp * dt;
     collide(map, t);
+    if (!onPlateau(map, t.x, t.y)) { fall(m, t, now); return; }
   }
   t.ta = turnTo(t.ta, inp.aim, dt * (t.bot ? 6 : 40));
 
@@ -655,13 +700,14 @@ function damage(m, t, b, now) {
 function eliminate(m, t, killer, cause, now) {
   if (!t.alive) return;
   t.alive = false; t.hp = 0; t.killerId = killer ? killer.id : null;
-  if (t.ph === 'ground') m.events.push({ k: 'boom', x: t.x, y: t.y });
+  if (t.ph === 'ground' && cause !== 'fall') m.events.push({ k: 'boom', x: t.x, y: t.y });
   let text;
   if (killer && killer !== t) {
     killer.kills++; text = `${killer.name} hat ${t.name} eliminiert`;
     if (killer.alive) { const before = killer.hp; killer.hp = Math.min(MAX_HP, killer.hp + KILL_HEAL); m.events.push({ k: 'heal', x: killer.x, y: killer.y, i: killer.id, d: Math.round(killer.hp - before) }); }
   }
   else if (cause === 'zone') text = `${t.name} wurde vom Sturm erwischt`;
+  else if (cause === 'fall') text = `${t.name} ist in den Abgrund gestürzt`;
   else text = `${t.name} hat das Spiel verlassen`;
   m.events.push({ k: 'feed', g: 1, text, by: killer ? killer.id : null, v: t.id });
   if (killer) m.events.push({ k: 'elim', g: 1, by: killer.id, v: t.id, vn: t.name });
@@ -729,7 +775,7 @@ function shotClear(map, a, b, h) {
   return true;
 }
 function blockedAt(map, x, y) {
-  return x < TR + 10 || y < TR + 10 || x > MAP - TR - 10 || y > MAP - TR - 10 || rockAt(map, x, y, TR + 6);
+  return !onPlateau(map, x, y, 60) || x < TR + 10 || y < TR + 10 || x > MAP - TR - 10 || y > MAP - TR - 10 || rockAt(map, x, y, TR + 6);
 }
 
 function botThink(m, t, now, dt) {
@@ -783,6 +829,7 @@ function botThink(m, t, now, dt) {
       const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * Math.min(zr * 0.6, 700);
       const cx = Math.hypot(t.x - zx, t.y - zy) < zr * 0.6 ? t.x : zx, cy = Math.hypot(t.x - zx, t.y - zy) < zr * 0.6 ? t.y : zy;
       ai.wx = clamp(cx + Math.cos(a) * r, 80, MAP - 80); ai.wy = clamp(cy + Math.sin(a) * r, 80, MAP - 80); ai.wT = 5 + Math.random() * 4;
+      if (!onPlateau(map, ai.wx, ai.wy, 120)) { ai.wx = zx; ai.wy = zy; }
     }
     gx = ai.wx; gy = ai.wy;
   }
@@ -837,6 +884,7 @@ function stepMatch(m, now, dt) {
       collide(m.map, a); collide(m.map, b);
     }
   }
+  for (const t of ground) if (t.alive && !onPlateau(m.map, t.x, t.y)) fall(m, t, now);
   updateBullets(m, now, dt);
   const z = m.zone, dps = zoneDps(z);
   for (const t of ground) {
@@ -902,7 +950,7 @@ function sendStates(m, now) {
 }
 
 // ================= Haupt-Takt =================
-const TICK = 1 / 30;
+const TICK = 1 / 40; // 40 Updates pro Sekunde für flüssige Bewegung
 setInterval(() => {
   const now = nowS();
   for (const m of [...matches.values()]) {

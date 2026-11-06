@@ -1,7 +1,7 @@
 // PANZER – Spiel: flüssiges Zeichnen, Vorhersage, Büsche, HUD
 'use strict';
 
-const cv = $('cv'), ctx = cv.getContext('2d', { alpha: false, desynchronized: true });
+const cv = $('cv'), ctx = cv.getContext('2d', { alpha: false });
 const mini = $('mini'), mctx = mini.getContext('2d');
 let inGame = false;
 const G = {};
@@ -27,7 +27,20 @@ resetG();
 
 function startGame(m) {
   resetG();
+  $('bigmap').classList.add('hidden');
   G.map = m.map; G.maxHp = m.maxHp; G.bushMax = 1; G.bus = m.bus; G.blockCd = m.blockCd;
+  { // Umriss der Bergkuppe als Punkte + Wolken tief unten
+    const P = m.map.plateau, N = P.r.length;
+    G.plat = P.r.map((R, i) => [P.cx + Math.cos(i / N * Math.PI * 2) * R, P.cy + Math.sin(i / N * Math.PI * 2) * R]);
+    const r = rng(P.r[0] * 7 + P.r[5]);
+    G.skyClouds = [];
+    for (let i = 0; i < 90; i++) {
+      const cx = -500 + r() * (m.map.size + 1000), cy = -500 + r() * (m.map.size + 1000), puffs = [];
+      const n = 3 + Math.floor(r() * 3), w = 50 + r() * 90;
+      for (let k = 0; k < n; k++) puffs.push([cx + (k - n / 2) * w * 0.45 + r() * 10, cy + (r() - 0.5) * w * 0.25, w * (0.32 + r() * 0.2)]);
+      G.skyClouds.push({ x: cx, y: cy, r: w * 1.3, puffs });
+    }
+  }
   G.bushes = m.map.bushes.map(b => ({ ...b }));
   for (const r of m.roster) G.roster.set(r.id, r);
   G.myTeam = m.myTeam; G.teamSize = m.roster.filter(r => r.team === m.myTeam).length;
@@ -42,6 +55,7 @@ function startGame(m) {
 function exitGame() {
   if (!inGame) return;
   inGame = false;
+  if (document.pointerLockElement) document.exitPointerLock();
   for (const tm of G.tutTimers) clearTimeout(tm);
   resetG();
   show(loggedIn ? 'lobby' : 'login');
@@ -160,7 +174,8 @@ function processSnap(s, late) {
         break;
       case 'jump': if (e.i === me.pid) { sfx.jump(); centerMsg(null, 'Mit WASD zum Landeplatz steuern', 2600); } break;
       case 'land': G.effects.push({ k: 'land', x: e.x, y: e.y, t0: now, life: 600 }); if (e.i === me.pid) { sfx.land(); G.shake = 8; } break;
-      case 'elim': if (e.by === me.pid) { centerMsg('ERLEDIGT', e.vn, 1500); sfx.kill(); } break;
+      case 'fall': G.effects.push({ k: 'fall', x: e.x, y: e.y, a: e.a, skin: skinIdOf(e.i), seed: hashStr(e.i), t0: now, life: 1200 }); sfx.fall(volAt(e.x, e.y)); break;
+      case 'elim': if (e.by === me.pid) { centerMsg('ELIMINIERT', e.vn, 1500); G.killMark = now; sfx.kill(); } break;
       case 'zone': centerMsg('Der Sturm zieht sich zusammen!', null, 2000); sfx.zone(); break;
       case 'over': break;
     }
@@ -230,7 +245,7 @@ function updateHud(s) {
 }
 
 function onDead(m) {
-  G.deathText = m.by ? `Erledigt von ${m.by}` : m.cause === 'zone' ? 'Der Sturm hat dich erwischt' : '';
+  G.deathText = m.by ? `Eliminiert von ${m.by}` : m.cause === 'zone' ? 'Der Sturm hat dich erwischt' : m.cause === 'fall' ? 'Du bist in den Abgrund gestürzt' : '';
   if (!G.result) $('deathCard').classList.remove('hidden');
   $('deathCard').querySelector('.t').textContent = m.place ? `#${m.place}  Eliminiert` : 'Eliminiert';
   setText('deathBy', G.deathText);
@@ -276,32 +291,50 @@ function onResult(m) {
 
 // ---------- Eingabe ----------
 addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || settingsOpen()) return;
   const k = e.key.toLowerCase();
   keys[k] = true;
-  if (inGame && [' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
+  if (inGame && (['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k) || Object.values(settings.keys).includes(k))) e.preventDefault();
+  if (inGame && k === settings.keys.spec && G.cur && !G.cur.me.alive && !e.repeat) send({ t: 'spectate' });
+  if (inGame && k === settings.keys.map && !e.repeat) { G.bigMap = !G.bigMap; $('bigmap').classList.toggle('hidden', !G.bigMap); }
 });
 addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; gm.down = false; });
-cv.addEventListener('pointermove', (e) => { gm.x = e.clientX; gm.y = e.clientY; });
-cv.addEventListener('pointerdown', (e) => { if (e.button === 0) gm.down = true; if (e.button === 2) gm.rdown = true; gm.x = e.clientX; gm.y = e.clientY; ac(); });
+// Maus: eingefangen (mit Empfindlichkeit) oder normal
+addEventListener('mousemove', (e) => {
+  if (document.pointerLockElement === cv) {
+    gm.x = clamp(gm.x + e.movementX * settings.sens, 0, innerWidth);
+    gm.y = clamp(gm.y + e.movementY * settings.sens, 0, innerHeight);
+  } else if (e.target === cv) { gm.x = e.clientX; gm.y = e.clientY; }
+});
+cv.addEventListener('pointerdown', (e) => {
+  if (settings.lock && document.pointerLockElement !== cv && inGame) {
+    try { const p = cv.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch { /* egal */ }
+  }
+  if (e.button === 0) gm.down = true; if (e.button === 2) gm.rdown = true;
+  if (document.pointerLockElement !== cv) { gm.x = e.clientX; gm.y = e.clientY; }
+  ac();
+});
 addEventListener('pointerup', (e) => { if (e.button === 0) gm.down = false; if (e.button === 2) gm.rdown = false; });
 cv.addEventListener('contextmenu', (e) => e.preventDefault());
 
 function readMove() {
+  const K = settings.keys;
   let dx = 0, dy = 0;
-  if (keys['w'] || keys['arrowup']) dy -= 1;
-  if (keys['s'] || keys['arrowdown']) dy += 1;
-  if (keys['a'] || keys['arrowleft']) dx -= 1;
-  if (keys['d'] || keys['arrowright']) dx += 1;
+  if (keys[K.up] || keys['arrowup']) dy -= 1;
+  if (keys[K.down] || keys['arrowdown']) dy += 1;
+  if (keys[K.left] || keys['arrowleft']) dx -= 1;
+  if (keys[K.right] || keys['arrowright']) dx += 1;
   return { dx, dy };
 }
 function screenToWorld(sx, sy) { const z = G.cam.z; return { x: G.cam.x + (sx - innerWidth / 2) / z, y: G.cam.y + (sy - innerHeight / 2) / z }; }
 setInterval(() => {
   const s = G.snaps[G.snaps.length - 1];
   if (!inGame || !s || !s.me.alive) return;
-  const { dx, dy } = readMove();
-  send({ t: 'input', dx, dy, aim: G.aim, fire: gm.down || !!keys[' '], block: !!(gm.rdown || keys['shift'] || keys['e']) });
+  if (settingsOpen()) { send({ t: 'input', dx: 0, dy: 0, aim: G.aim, fire: false, block: false }); return; }
+  const { dx, dy } = readMove(), K = settings.keys;
+  const fire = gm.down || !!keys[K.fire] || (s.me.ph === 1 && !!keys[K.jump]);
+  send({ t: 'input', dx, dy, aim: G.aim, fire, block: !!(gm.rdown || keys[K.block]) });
 }, 33);
 
 // ---------- Vorgezeichnete Karte (Kacheln) ----------
@@ -339,24 +372,80 @@ function buildTile(tx, ty) {
   const x = c.getContext('2d');
   x.scale(s, s); x.translate(-tx * TILE + 1, -ty * TILE + 1);
   const x0 = tx * TILE - 1, y0 = ty * TILE - 1, x1 = x0 + TILE + 2, y1 = y0 + TILE + 2, MAP = G.map.size;
-  x.fillStyle = '#e9e0c9'; x.fillRect(x0, y0, TILE + 2, TILE + 2);
-  const ix0 = Math.max(0, x0), iy0 = Math.max(0, y0), ix1 = Math.min(MAP, x1), iy1 = Math.min(MAP, y1);
-  if (ix1 > ix0 && iy1 > iy0) {
-    x.fillStyle = PAPER; x.fillRect(ix0, iy0, ix1 - ix0, iy1 - iy0);
-    x.strokeStyle = GRID; x.lineWidth = 1; x.beginPath();
-    for (let gx = Math.ceil(ix0 / 80) * 80; gx <= ix1; gx += 80) { x.moveTo(gx, iy0); x.lineTo(gx, iy1); }
-    for (let gy = Math.ceil(iy0 / 80) * 80; gy <= iy1; gy += 80) { x.moveTo(ix0, gy); x.lineTo(ix1, gy); }
-    x.stroke();
-  }
+  // Himmel unter der Bergkuppe, mit Wolken tief unten
+  x.fillStyle = '#cfe8f7'; x.fillRect(x0, y0, TILE + 2, TILE + 2);
   const hit = (o, r) => o.x + r > x0 && o.x - r < x1 && o.y + r > y0 && o.y - r < y1;
+  for (const cl of G.skyClouds) {
+    if (!hit(cl, cl.r)) continue;
+    x.strokeStyle = '#a7cde6'; x.lineWidth = 6;
+    for (const [px, py, pr] of cl.puffs) { x.beginPath(); x.arc(px, py, pr, 0, 7); x.stroke(); }
+    x.fillStyle = '#f4fbff';
+    for (const [px, py, pr] of cl.puffs) { x.beginPath(); x.arc(px, py, pr, 0, 7); x.fill(); }
+  }
+  // Hohe, felsige Klippe: einzelne Felsblöcke entlang der Kante, nach unten dunkler
+  if (hit({ x: G.map.plateau.cx, y: G.map.plateau.cy }, 99999)) drawCliff(x, x0, y0, x1, y1);
+  // Oberfläche der Kuppe: Papier mit Karo
+  x.save(); poly(x, G.plat); x.clip();
+  x.fillStyle = PAPER; x.fillRect(x0, y0, TILE + 2, TILE + 2);
+  x.strokeStyle = GRID; x.lineWidth = 1; x.beginPath();
+  for (let gx = Math.ceil(x0 / 80) * 80; gx <= x1; gx += 80) { x.moveTo(gx, y0); x.lineTo(gx, y1); }
+  for (let gy = Math.ceil(y0 / 80) * 80; gy <= y1; gy += 80) { x.moveTo(x0, gy); x.lineTo(x1, gy); }
+  x.stroke(); x.restore();
+  // Felskante oben
+  x.strokeStyle = '#a08a68'; x.lineWidth = 8; poly(x, G.plat); x.stroke();
+  sketchStroke(x, G.plat, 4242, 1.4, true, 3.2);
   G.map.hills.forEach((hl, i) => { if (hit(hl, hl.r + 8)) drawHill(x, hl, i); });
   G.map.teleports.forEach((tp, i) => { if (hit(tp, 40)) sketchFill(x, circlePts(tp.x, tp.y, tp.r + 6, 16, i * 13, 0.08), i * 13, tp.color + '55', 1.2, 2.4); });
   G.map.rocks.forEach((k, i) => { if (hit(k, k.r + 10)) drawRock(x, k, i); });
-  if (x0 < 4 || y0 < 4 || x1 > MAP - 4 || y1 > MAP - 4) sketchStroke(x, mapEdgePts(MAP), 4242, 2.5, true, 4);
   return c;
 }
+const CLIFF_D = 150; // Höhe der Felswand
+function drawCliff(x, x0, y0, x1, y1) {
+  const P = G.plat, N = P.length;
+  // Grundfläche der Wand
+  const base = P.map(([px, py]) => [px, py + CLIFF_D]);
+  const g = x.createLinearGradient(0, G.map.plateau.cy, 0, G.map.plateau.cy + G.map.size * 0.5 + CLIFF_D);
+  g.addColorStop(0, '#a48a66'); g.addColorStop(1, '#6e5c46');
+  x.fillStyle = g;
+  x.beginPath();
+  for (let i = 0; i < N; i++) { const [px, py] = P[i]; i ? x.lineTo(px, py) : x.moveTo(px, py); }
+  for (let i = N - 1; i >= 0; i--) { const [px, py] = base[i]; x.lineTo(px, py); }
+  x.closePath(); x.fill();
+  sketchStroke(x, base, 9911, 2.5, true, 3);
+  // Felsblöcke: Facetten zwischen Kante und Fuß, unterschiedlich hell, mit Rissen
+  const r = rng(5150);
+  for (let i = 0; i < N; i++) {
+    const a = P[i], b = P[(i + 1) % N];
+    const minX = Math.min(a[0], b[0]) - 30, maxX = Math.max(a[0], b[0]) + 30;
+    const v1 = r(), v2 = r(), v3 = r(), v4 = r(), v5 = r();
+    if (maxX < x0 || minX > x1 || Math.max(a[1], b[1]) + CLIFF_D + 20 < y0 || Math.min(a[1], b[1]) - 20 > y1) continue;
+    const nx = b[1] - a[1], ny = -(b[0] - a[0]); // nach außen zeigende Normale
+    if (ny < -5) continue; // Rückseite (nach oben) ist von oben nicht zu sehen
+    const d1 = CLIFF_D * (0.45 + v1 * 0.25), d2 = CLIFF_D * (0.45 + v2 * 0.25);
+    const shade = Math.max(0, Math.min(1, 0.5 + nx / Math.hypot(nx, ny || 1) * 0.35 + (v3 - 0.5) * 0.25));
+    const col = (k) => mixHex('#cbb48c', '#8a7454', k);
+    // oberer Block
+    const top = [a, b, [b[0] + (v4 - 0.5) * 8, b[1] + d2], [a[0] + (v5 - 0.5) * 8, a[1] + d1]];
+    x.fillStyle = col(shade * 0.7); poly(x, top); x.fill();
+    x.strokeStyle = INK; x.lineWidth = 1.6; poly(x, top); x.stroke();
+    // unterer Block
+    const bot = [top[3], top[2], [b[0], b[1] + CLIFF_D], [a[0], a[1] + CLIFF_D]];
+    x.fillStyle = col(0.35 + shade * 0.65); poly(x, bot); x.fill();
+    x.strokeStyle = 'rgba(43,38,32,.7)'; x.lineWidth = 1.3; poly(x, bot); x.stroke();
+    // Riss
+    if (v1 > 0.55) {
+      x.strokeStyle = 'rgba(43,38,32,.55)'; x.lineWidth = 1.2; x.beginPath();
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2 + d1 * 0.3;
+      x.moveTo(mx, my); x.lineTo(mx + (v2 - 0.5) * 10, my + 18); x.lineTo(mx + (v3 - 0.5) * 12, my + 34); x.stroke();
+    }
+  }
+  // Nebelschleier am Fuß der Wand
+  x.strokeStyle = 'rgba(244,251,255,.75)'; x.lineWidth = 16; x.lineCap = 'round';
+  poly(x, base); x.stroke();
+}
+
 function ensureScale() {
-  const dpr = devicePixelRatio || 1;
+  const dpr = effDpr() * (settings.quality === 'niedrig' ? 0.8 : 1);
   const base = Math.max(0.5, Math.min(innerWidth / 1100, innerHeight / 700));
   const s = Math.min(2.5, Math.max(0.6, base * dpr));
   if (Math.abs(s - G.tileScale) > 0.01) { G.tileScale = s; G.tiles.clear(); G.sprites.clear(); }
@@ -368,13 +457,13 @@ function drawTiles(vx0, vy0, vx1, vy1) {
     for (let tx = Math.max(-1, Math.floor(vx0 / TILE)); tx <= Math.min(n, Math.floor(vx1 / TILE)); tx++) {
       const key = tx + ',' + ty;
       let t = G.tiles.get(key);
-      if (!t && built < 10) { t = { c: buildTile(tx, ty) }; G.tiles.set(key, t); built++; }
-      if (!t) { ctx.fillStyle = PAPER; ctx.fillRect(tx * TILE, ty * TILE, TILE, TILE); continue; }
+      if (!t && built < 24) { t = { c: buildTile(tx, ty) }; G.tiles.set(key, t); built++; }
+      if (!t) continue;
       t.used = G.frame;
       ctx.drawImage(t.c, tx * TILE - 1, ty * TILE - 1, TILE + 2, TILE + 2);
     }
   }
-  if (G.tiles.size > 70) for (const [k, t] of G.tiles) if (G.frame - t.used > 120) G.tiles.delete(k);
+  if (G.tiles.size > 110) for (const [k, t] of G.tiles) if (G.frame - t.used > 120) G.tiles.delete(k);
 }
 
 // ---------- Büsche: Blätterhaufen, jeder Schadenszustand eigenes Bild ----------
@@ -537,9 +626,12 @@ function pickupSprite(type) {
 
 // ---------- Minimap ----------
 function buildMiniStatic() {
-  const S = 380, c = document.createElement('canvas'); c.width = c.height = S;
+  const S = 900, c = document.createElement('canvas'); c.width = c.height = S;
   const x = c.getContext('2d'), k = S / G.map.size;
-  x.fillStyle = PAPER; x.fillRect(0, 0, S, S);
+  x.fillStyle = '#cfe8f7'; x.fillRect(0, 0, S, S);
+  x.fillStyle = '#8a7454'; poly(x, G.plat.map(([a, b]) => [a * k, b * k + 9])); x.fill();
+  x.fillStyle = PAPER; poly(x, G.plat.map(([a, b]) => [a * k, b * k])); x.fill();
+  x.strokeStyle = INK; x.lineWidth = 2; x.stroke();
   for (const hl of G.map.hills) {
     x.fillStyle = '#ecdcb2'; x.beginPath(); x.arc(hl.x * k, hl.y * k, hl.r * k, 0, 7); x.fill();
     x.fillStyle = '#dcc68e'; x.beginPath(); x.arc(hl.x * k, hl.y * k, hl.p * k, 0, 7); x.fill();
@@ -584,6 +676,42 @@ function drawMini(s) {
   mctx.strokeStyle = 'rgba(43,38,32,.35)'; mctx.lineWidth = 1; mctx.strokeRect(fx - vw / 2, fy - vh / 2, vw, vh);
 }
 
+// ---------- Große Karte (Taste M) ----------
+function drawBigMap(s, bus) {
+  const c = $('bigmap'), x = c.getContext('2d');
+  const { w } = fitCanvas(c, x);
+  if (!G.miniStatic) return;
+  const k = w / G.map.size;
+  x.drawImage(G.miniStatic, 0, 0, w, w);
+  const z = s.z;
+  x.save();
+  x.beginPath(); x.rect(0, 0, w, w); x.arc(z.x * k, z.y * k, Math.max(0, z.r * k), 0, Math.PI * 2, true);
+  x.fillStyle = 'rgba(140,60,210,.3)'; x.fill('evenodd');
+  x.strokeStyle = '#8a3fd0'; x.lineWidth = 3; x.beginPath(); x.arc(z.x * k, z.y * k, Math.max(0, z.r * k), 0, 7); x.stroke();
+  if (z.st !== 'done' && z.tr > 0) { x.setLineDash([8, 6]); x.strokeStyle = '#ffffff'; x.lineWidth = 3; x.beginPath(); x.arc(z.tx * k, z.ty * k, z.tr * k, 0, 7); x.stroke(); x.setLineDash([]); }
+  x.restore();
+  if (bus && G.bus) {
+    x.save(); x.setLineDash([10, 7]); x.strokeStyle = INK; x.lineWidth = 2.5;
+    x.beginPath(); x.moveTo(G.bus.x0 * k, G.bus.y0 * k); x.lineTo(G.bus.x1 * k, G.bus.y1 * k); x.stroke(); x.restore();
+    x.fillStyle = '#4f86e8'; x.strokeStyle = INK; x.lineWidth = 2;
+    x.beginPath(); x.arc(bus.x * k, bus.y * k, 9, 0, 7); x.fill(); x.stroke();
+  }
+  x.font = '16px "Patrick Hand", sans-serif'; x.textAlign = 'center';
+  for (const [id, mx, my, alive] of s.mates) {
+    if (!alive || id === me.pid) continue;
+    x.fillStyle = '#6fcf6f'; x.strokeStyle = INK; x.lineWidth = 2;
+    x.beginPath(); x.arc(mx * k, my * k, 7, 0, 7); x.fill(); x.stroke();
+    x.fillStyle = INK; x.fillText(nameOf(id), mx * k, my * k - 12);
+  }
+  const fx = G.cam.x * k, fy = G.cam.y * k;
+  x.save(); x.translate(fx, fy); x.rotate(G.aim);
+  x.fillStyle = '#f2c94c'; x.strokeStyle = INK; x.lineWidth = 2.5;
+  x.beginPath(); x.moveTo(14, 0); x.lineTo(-9, -9); x.lineTo(-4, 0); x.lineTo(-9, 9); x.closePath(); x.fill(); x.stroke();
+  x.restore();
+  x.fillStyle = INK; x.font = 'bold 22px "Gochi Hand", cursive'; x.textAlign = 'left';
+  x.fillText(`Karte  ·  ${keyName(settings.keys.map)} zum Schließen`, 14, 30);
+}
+
 // ---------- Eigener Panzer: sofort reagieren (Vorhersage) ----------
 function predictMe(dt, s) {
   const L = G.newMe;
@@ -618,6 +746,27 @@ function predictMe(dt, s) {
   if (err > 70) { P.x = L.x; P.y = L.y; } // z. B. Teleporter
   else { const c = Math.min(1, dt * 6); P.x += ex * c; P.y += ey * c; }
   return P;
+}
+
+// ---------- Hitmarker (wie in Fortnite: weißes X, bei Eliminierung rot und größer) ----------
+function drawHitmarker(nowMs) {
+  const kt = nowMs - (G.killMark || 0), ht = nowMs - (G.hitMark || 0);
+  const kill = kt < 380, hit = ht < 200;
+  if (!kill && !hit) return;
+  const p = kill ? kt / 380 : ht / 200;
+  const pop = kill ? 1.5 - 0.3 * p : 1.25 - 0.25 * p;
+  const r0 = 7 * pop, r1 = (kill ? 20 : 15) * pop;
+  ctx.save();
+  ctx.globalAlpha = 1 - p * p;
+  ctx.lineCap = 'round';
+  for (const [w, col] of [[6.5, 'rgba(43,38,32,.85)'], [3.2, kill ? '#ff3b2f' : '#ffffff']]) {
+    ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath();
+    for (const [a, b] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      ctx.moveTo(gm.x + a * r0 * 0.707, gm.y + b * r0 * 0.707); ctx.lineTo(gm.x + a * r1 * 0.707, gm.y + b * r1 * 0.707);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // ---------- Fallschirm & Kampfbus ----------
@@ -686,8 +835,8 @@ function drawGame(nowMs) {
   G.frame++;
   G.fps.n++;
   if (nowMs - G.fps.t > 500) { setText('fps', `${Math.round(G.fps.n * 1000 / (nowMs - G.fps.t))} FPS`); G.fps.n = 0; G.fps.t = nowMs; }
-  const { w, h } = fitCanvas(cv, ctx);
-  ctx.fillStyle = '#e9e0c9'; ctx.fillRect(0, 0, w, h);
+  const { w, h } = fitCanvas(cv, ctx, effDpr());
+  ctx.fillStyle = '#cfe8f7'; ctx.fillRect(0, 0, w, h);
   if (!G.map || !G.snaps.length || G.offset == null) return;
   ensureScale();
 
@@ -731,15 +880,16 @@ function drawGame(nowMs) {
     const ff = (focus && focus === myT) || inBus ? 1 : Math.min(1, dt * 10);
     cam.x += (fp.x - cam.x) * ff; cam.y += (fp.y - cam.y) * ff;
   }
-  const baseZ = Math.max(0.5, Math.min(w / 1100, h / 700));
-  const zt = inBus ? baseZ * 0.42 : baseZ / (1 + 0.22 * (focus ? focus.h : 0)) / (1 + 1.3 * (focus ? focus.alt || 0 : 0));
+  const baseZ = Math.max(0.5, Math.min(w / 1100, h / 700)) * settings.zoom;
+  const zt = inBus ? baseZ * 0.72 : baseZ / (1 + 0.22 * (focus ? focus.h : 0)) / (1 + 0.35 * (focus ? focus.alt || 0 : 0));
   cam.z += (zt - cam.z) * Math.min(1, dt * 3);
   const z = cam.z;
   G.shake *= Math.pow(0.002, dt);
-  const shx = (Math.random() - 0.5) * G.shake, shy = (Math.random() - 0.5) * G.shake;
+  const shk = settings.shake ? G.shake : 0;
+  const shx = (Math.random() - 0.5) * shk, shy = (Math.random() - 0.5) * shk;
   if (myT) { const wm = screenToWorld(gm.x, gm.y); G.aim = Math.atan2(wm.y - myT.y, wm.x - myT.x); myT.ta = G.aim; }
 
-  const dpr = devicePixelRatio || 1;
+  const dpr = effDpr();
   ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (w / 2 - cam.x * z + shx), dpr * (h / 2 - cam.y * z + shy));
   const vx0 = cam.x - w / 2 / z - 60, vy0 = cam.y - h / 2 / z - 60, vx1 = cam.x + w / 2 / z + 60, vy1 = cam.y + h / 2 / z + 60;
   const vis = (o, r) => o.x + r > vx0 && o.x - r < vx1 && o.y + r > vy0 && o.y - r < vy1;
@@ -869,6 +1019,9 @@ function drawGame(nowMs) {
       ctx.stroke();
     } else if (e.k === 'tp') {
       ctx.strokeStyle = '#9a6cff'; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(e.x, e.y, 10 + p * 36, 0, 7); ctx.stroke();
+    } else if (e.k === 'fall') {
+      ctx.globalAlpha = 1;
+      drawTank(ctx, e.x, e.y + p * 170, e.a + p * 5, e.a + p * 5, e.skin, e.seed, { scale: 1.12 * (1 - p * 0.85), alpha: 1 - p * p });
     } else if (e.k === 'land') {
       ctx.fillStyle = '#c9b68c';
       for (let j = 0; j < 10; j++) { const a = j / 10 * 6.28; ctx.beginPath(); ctx.arc(e.x + Math.cos(a) * (14 + p * 30), e.y + Math.sin(a) * (14 + p * 30), 5 * (1 - p) + 2, 0, 7); ctx.fill(); }
@@ -896,9 +1049,9 @@ function drawGame(nowMs) {
   for (let x = Math.floor((vx0 - hs) / 26) * 26; x < vx1; x += 26) { ctx.moveTo(x, vy1); ctx.lineTo(x + hs, vy0); }
   ctx.stroke();
   ctx.restore();
-  if (zn.r > 0 && Math.hypot(clamp(cam.x, zn.x - zn.r, zn.x + zn.r) - cam.x, 0) < 1e9) {
-    const n = Math.round(clamp(zn.r / 10, 30, 220));
-    sketchStroke(ctx, circlePts(zn.x, zn.y, zn.r, n, 7, 0.004), 7, 2, true, 5, '#8a3fd0');
+  if (zn.r > 0) {
+    ctx.strokeStyle = '#8a3fd0'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(zn.x, zn.y, zn.r, 0, 7); ctx.stroke();
+    ctx.strokeStyle = 'rgba(138,63,208,.45)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(zn.x + 2, zn.y - 1, zn.r + 4, 0, 7); ctx.stroke();
   }
   if (zn.st !== 'done' && zn.tr > 0) {
     ctx.save(); ctx.setLineDash([18, 14]); ctx.lineDashOffset = -t * 20;
@@ -917,13 +1070,8 @@ function drawGame(nowMs) {
       ctx.strokeStyle = 'rgba(43,38,32,.55)'; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(gm.x, gm.y, 20, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - latestMe.rl / 1.1)); ctx.stroke();
     }
-    const hit = nowMs - G.hitMark < 160;
-    ctx.strokeStyle = hit ? '#e8594f' : INK; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.arc(gm.x, gm.y, 11, 0, 7); ctx.stroke();
-    ctx.beginPath();
-    for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { ctx.moveTo(gm.x + a * 6, gm.y + b * 6); ctx.lineTo(gm.x + a * 17, gm.y + b * 17); }
-    if (hit) { ctx.moveTo(gm.x - 8, gm.y - 8); ctx.lineTo(gm.x - 3, gm.y - 3); ctx.moveTo(gm.x + 8, gm.y - 8); ctx.lineTo(gm.x + 3, gm.y - 3); ctx.moveTo(gm.x - 8, gm.y + 8); ctx.lineTo(gm.x - 3, gm.y + 3); ctx.moveTo(gm.x + 8, gm.y + 8); ctx.lineTo(gm.x + 3, gm.y + 3); }
-    ctx.stroke();
+    drawCrosshair(ctx, gm.x, gm.y);
+    drawHitmarker(nowMs);
   } else {
     ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(gm.x, gm.y, 4, 0, 7); ctx.fill();
   }
@@ -935,6 +1083,7 @@ function drawGame(nowMs) {
     G.confetti = G.confetti.filter(c => c.y < h + 20);
   }
   if (G.frame % 3 === 0) drawMini(s);
+  if (G.bigMap) drawBigMap(s, bus);
 }
 
 // ================= Hauptschleife =================

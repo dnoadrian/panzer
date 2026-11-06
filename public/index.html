@@ -162,7 +162,31 @@
   #tutorial div { font-family: 'Gochi Hand', cursive; font-size: clamp(30px, 4.4vw, 54px); background: rgba(255,253,246,.94); border: 4px solid var(--ink);
     padding: 10px 28px; border-radius: var(--r1); box-shadow: 6px 7px 0 rgba(43,38,32,.25); animation: pop .35s ease-out; max-width: 90vw; }
 
+  #bigmap { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(86vh, 92vw); height: min(86vh, 92vw);
+    border: 4px solid var(--ink); border-radius: 14px 6px 16px 6px; box-shadow: 8px 9px 0 rgba(43,38,32,.3); background: #cfe8f7; z-index: 6; pointer-events: none; }
   #fps { position: absolute; left: 12px; bottom: 10px; font-size: 14px; color: var(--soft); pointer-events: none; }
+
+  /* Einstellungen */
+  #settings { position: fixed; inset: 0; z-index: 35; background: rgba(43,38,32,.35); display: grid; place-items: center; padding: 16px; cursor: default; }
+  .setcard { width: min(640px, 100%); max-height: 92vh; display: flex; flex-direction: column; animation: pop .3s ease-out; }
+  .sethead { display: flex; align-items: center; padding: 12px 18px; border-bottom: 3px solid var(--ink); }
+  .sethead h2 { flex: 1; margin: 0; font-size: 36px; }
+  .setbody { overflow-y: auto; padding: 6px 20px 14px; }
+  .setsec h3 { font-family: 'Gochi Hand', cursive; font-size: 26px; margin: 14px 0 4px; }
+  .srow { display: flex; align-items: center; gap: 12px; padding: 6px 2px; border-bottom: 2px dotted var(--line); }
+  .srow > span { flex: 1; }
+  .srow small { color: var(--soft); font-size: 14px; display: block; }
+  .srow b { min-width: 46px; text-align: right; }
+  .srow input[type=range] { width: 180px; accent-color: #e0a400; }
+  .srow input[type=checkbox] { width: 22px; height: 22px; accent-color: #e0a400; }
+  .srow select { font: inherit; font-size: 17px; border: 2px solid var(--ink); border-radius: 8px; padding: 2px 8px; background: #fff; }
+  .keybtn { min-width: 120px; font: inherit; font-size: 17px; cursor: pointer; background: #fff; border: 2px solid var(--ink); border-radius: 8px 3px 9px 4px; padding: 2px 10px; box-shadow: 2px 2px 0 var(--ink); }
+  .keybtn.wait { background: var(--yellow); }
+  .swatches { display: flex; gap: 8px; }
+  .swatches button { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--ink); cursor: pointer; }
+  .swatches button.on { box-shadow: 0 0 0 3px var(--yellow); }
+  .hint2 { color: var(--soft); font-size: 15px; margin-top: 6px; }
+  .setfoot { display: flex; gap: 10px; align-items: center; padding: 12px 18px; border-top: 3px solid var(--ink); }
 
   @media (max-width: 760px) {
     .topbar .logo { font-size: 34px; } .tabs { margin-left: 0; } .tab { font-size: 22px; } .lvl .bar, .lvl small { display: none; }
@@ -190,6 +214,7 @@
     <div class="tabs">
       <button class="tab on" data-tab="stage">Lobby</button>
       <button class="tab" data-tab="locker">Spind</button>
+      <button class="tab" data-tab="settings">Einstellungen</button>
     </div>
     <div class="grow"></div>
     <div class="lvl">
@@ -231,12 +256,57 @@
 
 <div id="invites"></div>
 
+<!-- Einstellungen (Lobby-Tab und im Spiel mit Esc) -->
+<div id="settings" class="hidden">
+  <div class="setcard sketch">
+    <div class="sethead"><h2 class="hand">Einstellungen</h2><button class="iconbtn" id="btnSetClose" title="Schließen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#2b2620" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="setbody">
+      <div class="setsec">
+        <h3>Steuerung</h3>
+        <label class="srow"><span>Maus-Empfindlichkeit</span><input type="range" id="sSens" min="0.3" max="3" step="0.05"><b id="sSensV"></b></label>
+        <label class="srow"><span>Maus im Spiel einfangen <small>(nötig für die Empfindlichkeit)</small></span><input type="checkbox" id="sLock"></label>
+        <div id="sKeys"></div>
+        <div class="hint2">Linke Maustaste schießt und rechte Maustaste blockt immer. Die Pfeiltasten fahren immer.</div>
+      </div>
+      <div class="setsec">
+        <h3>Ton</h3>
+        <label class="srow"><span>Ton an</span><input type="checkbox" id="sSound"></label>
+        <label class="srow"><span>Lautstärke</span><input type="range" id="sVol" min="0" max="100" step="1"><b id="sVolV"></b></label>
+      </div>
+      <div class="setsec">
+        <h3>Grafik</h3>
+        <label class="srow"><span>Qualität</span><select id="sQual"><option value="hoch">Hoch</option><option value="mittel">Mittel</option><option value="niedrig">Niedrig (mehr FPS)</option></select></label>
+        <label class="srow"><span>Kamera-Zoom</span><input type="range" id="sZoom" min="0.75" max="1.3" step="0.05"><b id="sZoomV"></b></label>
+        <label class="srow"><span>Bildschirm wackelt bei Treffern</span><input type="checkbox" id="sShake"></label>
+        <label class="srow"><span>FPS anzeigen</span><input type="checkbox" id="sFps"></label>
+      </div>
+      <div class="setsec">
+        <h3>Fadenkreuz</h3>
+        <div class="srow"><span>Farbe</span><div id="sCross" class="swatches"></div></div>
+        <label class="srow"><span>Größe</span><input type="range" id="sCrossSize" min="0.6" max="1.8" step="0.05"><canvas id="sCrossPrev" width="96" height="96" style="width:48px;height:48px"></canvas></label>
+      </div>
+      <div class="setsec">
+        <h3>Konto</h3>
+        <div class="srow"><span>Konto löschen <small>(Name, Rang, Freunde und Skins werden gelöscht, der Name wird frei)</small></span><button class="btn small" id="btnDelete" style="background:#ffb4a8">Konto löschen</button></div>
+      </div>
+    </div>
+    <div class="setfoot">
+      <button class="btn small" id="btnSetReset">Standard</button>
+      <button class="btn small hidden" id="btnSetLeave">Spiel verlassen</button>
+      <span class="grow"></span>
+      <button class="btn yellow" id="btnSetDone">Fertig</button>
+    </div>
+  </div>
+</div>
+
 <!-- Spiel -->
 <div id="game" class="screen hidden">
   <canvas id="cv"></canvas>
   <div id="vignette"></div>
   <div id="hurt"></div>
   <canvas id="mini"></canvas>
+  <canvas id="bigmap" class="hidden"></canvas>
   <div id="feed"></div>
   <div id="mates"></div>
   <div id="hudTop">
@@ -270,6 +340,7 @@
 
 <script src="draw.js"></script>
 <script src="client.js"></script>
+<script src="settings.js"></script>
 <script src="game.js"></script>
 </body>
 </html>

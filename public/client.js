@@ -28,7 +28,9 @@ function ac() {
   if (actx.state === 'suspended') actx.resume();
   return actx;
 }
+const volMul = () => (typeof settings !== 'undefined' ? settings.vol / 100 : 0.8);
 function tone(freq, dur, type = 'square', vol = 0.1, slide = 0, delay = 0) {
+  vol *= volMul();
   const a = ac(); if (!a || vol <= 0.003) return;
   const t0 = a.currentTime + delay, o = a.createOscillator(), g = a.createGain();
   o.type = type; o.frequency.setValueAtTime(freq, t0);
@@ -38,6 +40,7 @@ function tone(freq, dur, type = 'square', vol = 0.1, slide = 0, delay = 0) {
 }
 let noiseBuf = null;
 function noise(dur, vol, freq = 1000, delay = 0) {
+  vol *= volMul();
   const a = ac(); if (!a || vol <= 0.003) return;
   if (!noiseBuf) { noiseBuf = a.createBuffer(1, a.sampleRate, a.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
   const t0 = a.currentTime + delay, s = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
@@ -47,13 +50,13 @@ function noise(dur, vol, freq = 1000, delay = 0) {
 }
 const sfx = {
   shot: (v) => { noise(0.14, 0.22 * v, 900); tone(120, 0.12, 'sine', 0.25 * v, -70); },
-  hit: () => { tone(1250, 0.05, 'square', 0.06); tone(1700, 0.05, 'square', 0.04, 0, 0.03); },
+  hit: () => { tone(2200, 0.045, 'triangle', 0.16, -300); tone(3300, 0.03, 'sine', 0.08); noise(0.03, 0.08, 6000); },
   hurt: () => { tone(170, 0.18, 'sawtooth', 0.12, -90); noise(0.1, 0.12, 600); },
   boom: (v) => { noise(0.7, 0.45 * v, 380); tone(70, 0.5, 'sine', 0.35 * v, -40); },
   bush: (v) => noise(0.09, 0.14 * v, 2600),
   dirt: (v) => noise(0.08, 0.12 * v, 500),
   pick: () => { tone(520, 0.08, 'triangle', 0.12); tone(780, 0.1, 'triangle', 0.12, 0, 0.07); },
-  kill: () => { tone(660, 0.1, 'square', 0.08); tone(990, 0.18, 'square', 0.08, 0, 0.09); },
+  kill: () => { tone(160, 0.18, 'sine', 0.3, -60); noise(0.08, 0.15, 3000); tone(1320, 0.09, 'triangle', 0.14, 0, 0.06); tone(1760, 0.22, 'triangle', 0.14, 0, 0.13); },
   zone: () => { tone(330, 0.35, 'sine', 0.1); tone(247, 0.45, 'sine', 0.1, 0, 0.3); },
   tick: () => tone(880, 0.05, 'sine', 0.06),
   go: () => { tone(523, 0.1, 'square', 0.08); tone(784, 0.25, 'square', 0.08, 0, 0.1); },
@@ -62,6 +65,7 @@ const sfx = {
   block: () => { tone(1500, 0.07, 'triangle', 0.09); tone(1100, 0.1, 'sine', 0.07, 0, 0.03); },
   blockOn: () => tone(400, 0.18, 'sine', 0.1, 500),
   jump: () => { noise(0.5, 0.15, 1800); tone(700, 0.4, 'sine', 0.08, -400); },
+  fall: (v) => { tone(1100, 1.0, 'sine', 0.12 * v, -900); },
   land: () => { noise(0.25, 0.3, 300); tone(90, 0.2, 'sine', 0.25, -40); },
   heal: () => { tone(520, 0.12, 'triangle', 0.1); tone(660, 0.12, 'triangle', 0.1, 0, 0.1); tone(880, 0.2, 'triangle', 0.1, 0, 0.2); },
 };
@@ -352,8 +356,8 @@ const stage = $('stage'), sctx = stage.getContext('2d');
 const mouse = { x: 0, y: 0, down: false };
 let stageSlots = [];
 function ellipsePts(cx, cy, rx, ry, n) { const o = []; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2; o.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]); } return o; }
-function fitCanvas(c, ctx2) {
-  const r = c.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+function fitCanvas(c, ctx2, dprOverride) {
+  const r = c.getBoundingClientRect(), dpr = dprOverride || devicePixelRatio || 1;
   const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
   if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
   ctx2.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -366,58 +370,162 @@ function paperGrid(c2, w, h, step = 32) {
   for (let y = 0; y < h; y += step) { c2.moveTo(0, y + 0.5); c2.lineTo(w, y + 0.5); }
   c2.stroke();
 }
+// ---- Lobby-Bühne: Himmel, Wolken, Berge, beleuchtete Plattformen ----
+let stageBg = null, stageBgKey = '';
+const cloudSprites = [];
+function makeCloudSprite(seed, W) {
+  const r = rng(seed), H = W * 0.62, pad = 10;
+  const c = document.createElement('canvas'); c.width = Math.ceil((W + pad * 2) * 2); c.height = Math.ceil((H + pad * 2) * 2);
+  const x = c.getContext('2d'); x.scale(2, 2); x.translate(pad, pad);
+  const base = H * 0.72, puffs = [];
+  const n = 4 + Math.floor(r() * 2);
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n, rad = W * (0.13 + r() * 0.06) * (1 - Math.abs(t - 0.5) * 0.6);
+    puffs.push([W * (0.1 + 0.8 * t), base - rad * (0.6 + r() * 0.5), rad]);
+  }
+  puffs.push([W * (0.35 + r() * 0.3), base - W * 0.24, W * (0.19 + r() * 0.04)]);
+  const shape = (ctx2) => {
+    ctx2.beginPath();
+    for (const [px, py, pr] of puffs) { ctx2.moveTo(px + pr, py); ctx2.arc(px, py, pr, 0, Math.PI * 2); }
+    ctx2.roundRect ? ctx2.roundRect(W * 0.06, base - H * 0.18, W * 0.88, H * 0.26, H * 0.13) : ctx2.rect(W * 0.06, base - H * 0.18, W * 0.88, H * 0.26);
+  };
+  // dicke Kontur unter der Füllung = nur die Außenkante bleibt
+  x.strokeStyle = INK; x.lineWidth = 5; x.lineJoin = 'round'; shape(x); x.stroke();
+  x.fillStyle = '#ffffff'; shape(x); x.fill();
+  x.save(); shape(x); x.clip();
+  x.fillStyle = '#dcecf8'; x.fillRect(0, base - H * 0.08, W, H);           // Schatten unten
+  x.fillStyle = 'rgba(255,255,255,.9)';
+  for (const [px, py, pr] of puffs) { x.beginPath(); x.ellipse(px - pr * 0.25, py - pr * 0.3, pr * 0.45, pr * 0.28, -0.4, 0, 7); x.fill(); }
+  x.strokeStyle = '#9fc4de'; x.lineWidth = 1.6; x.beginPath();
+  for (const [px, py, pr] of puffs) { x.moveTo(px + pr * 0.1, py + pr * 0.55); x.quadraticCurveTo(px + pr * 0.45, py + pr * 0.35, px + pr * 0.7, py + pr * 0.55); }
+  x.stroke();
+  x.restore();
+  return { c, w: W + pad * 2, h: H + pad * 2 };
+}
+for (let i = 0; i < 7; i++) cloudSprites.push(makeCloudSprite(300 + i * 17, i < 3 ? 110 + i * 15 : 170 + (i % 3) * 30));
+
+function buildStageBg(w, h, dpr) {
+  const c = document.createElement('canvas'); c.width = Math.ceil(w * dpr); c.height = Math.ceil(h * dpr);
+  const x = c.getContext('2d'); x.scale(dpr, dpr);
+  const hz = h * 0.58;
+  // Himmel mit Verlauf + leichtes Karo
+  const g = x.createLinearGradient(0, 0, 0, hz);
+  g.addColorStop(0, '#9fd3f5'); g.addColorStop(0.7, '#d6edf9'); g.addColorStop(1, '#fbf1da');
+  x.fillStyle = g; x.fillRect(0, 0, w, hz + 2);
+  x.strokeStyle = 'rgba(255,255,255,.35)'; x.lineWidth = 1; x.beginPath();
+  for (let gx = 0; gx < w; gx += 32) { x.moveTo(gx + 0.5, 0); x.lineTo(gx + 0.5, hz); }
+  for (let gy = 0; gy < hz; gy += 32) { x.moveTo(0, gy + 0.5); x.lineTo(w, gy + 0.5); }
+  x.stroke();
+  // ferne Berge (blass) mit Schneekappen
+  const far = [[0, hz]], r = rng(77);
+  for (let i = 0; i <= 9; i++) far.push([w * i / 9 + (r() - 0.5) * 40, hz - h * (0.14 + r() * 0.13)], [w * (i + 0.5) / 9, hz - h * (0.05 + r() * 0.05)]);
+  far.push([w, hz]);
+  sketchFill(x, far, 41, '#c9d6ec', 2, 2, '#6f7fa0');
+  x.fillStyle = '#ffffff';
+  for (let i = 1; i < far.length - 1; i += 2) {
+    const [px, py] = far[i];
+    x.beginPath(); x.moveTo(px, py); x.lineTo(px - 18, py + 20); x.lineTo(px - 6, py + 15); x.lineTo(px + 4, py + 22); x.lineTo(px + 17, py + 17); x.closePath(); x.fill();
+  }
+  // nahe Hügel (warm) mit Schraffur
+  const near = [[0, hz + 4]];
+  for (let i = 0; i <= 14; i++) near.push([w * i / 14, hz - (Math.sin(i * 1.3) * 0.5 + 0.55) * h * 0.075]);
+  near.push([w, hz + 4]);
+  sketchFill(x, near, 31, '#eadbb0', 2, 2.4);
+  hatchIn(x, near, 0, hz - h * 0.12, w, hz, 11, 'rgba(138,122,88,.35)', 5);
+  // Boden mit Gras
+  const gg = x.createLinearGradient(0, hz, 0, h);
+  gg.addColorStop(0, '#cfe6a6'); gg.addColorStop(1, '#b9db8c');
+  x.fillStyle = gg; x.fillRect(0, hz, w, h - hz);
+  x.strokeStyle = INK; x.lineWidth = 2.5; x.beginPath(); x.moveTo(0, hz); x.lineTo(w, hz); x.stroke();
+  const rr = rng(9);
+  x.strokeStyle = '#6fa04f'; x.lineWidth = 1.8; x.lineCap = 'round'; x.beginPath();
+  for (let i = 0; i < w * h / 2600; i++) {
+    const gx = rr() * w, gy = hz + 10 + rr() * (h - hz - 10);
+    x.moveTo(gx - 4, gy); x.lineTo(gx - 2, gy - 7); x.moveTo(gx, gy); x.lineTo(gx + 1, gy - 9); x.moveTo(gx + 4, gy); x.lineTo(gx + 3, gy - 6);
+  }
+  x.stroke();
+  for (let i = 0; i < w * h / 26000; i++) { // kleine Blumen
+    const gx = rr() * w, gy = hz + 20 + rr() * (h - hz - 20);
+    x.fillStyle = ['#ffffff', '#ffd25c', '#ff9ab0'][i % 3];
+    for (let k = 0; k < 5; k++) { const a = k / 5 * 6.28; x.beginPath(); x.arc(gx + Math.cos(a) * 3, gy + Math.sin(a) * 3, 2.2, 0, 7); x.fill(); }
+    x.fillStyle = '#e8a94f'; x.beginPath(); x.arc(gx, gy, 1.6, 0, 7); x.fill();
+  }
+  return c;
+}
+
 function drawStage(time) {
   const { w, h } = fitCanvas(stage, sctx);
-  paperGrid(sctx, w, h);
-  const t = time / 1000;
-  // Sonne, ferne Berge, Wolken
-  sketchFill(sctx, circlePts(w * 0.84, h * 0.2, Math.min(w, h) * 0.08, 18, 5, 0.05), 5, '#ffe08a', 1.5, 2.5);
-  const hz = h * 0.56;
-  const hills = [[0, hz]];
-  for (let i = 0; i <= 12; i++) hills.push([w * i / 12, hz - (Math.sin(i * 1.7) * 0.5 + 0.6) * h * 0.12]);
-  hills.push([w, hz]);
-  sketchFill(sctx, hills, 31, '#efe2c0', 2, 2.2);
-  for (let i = 0; i < 3; i++) {
-    const cx = ((t * 12 + i * 420) % (w + 300)) - 150, cy = h * (0.12 + i * 0.07);
-    sketchFill(sctx, [...circlePts(cx, cy, 26, 10, i), ...circlePts(cx + 30, cy + 4, 20, 8, i + 3)], 50 + i, '#ffffff', 1.4, 2);
-  }
-  sctx.strokeStyle = INK; sctx.lineWidth = 2.5; sctx.beginPath(); sctx.moveTo(0, hz); sctx.lineTo(w, hz); sctx.stroke();
+  const dpr = devicePixelRatio || 1, key = `${w}x${h}x${dpr}`;
+  if (stageBgKey !== key) { stageBg = buildStageBg(w, h, dpr); stageBgKey = key; }
+  sctx.drawImage(stageBg, 0, 0, w, h);
+  const t = time / 1000, hz = h * 0.58;
 
+  // Sonne mit drehenden Strahlen
+  const sx = w * 0.86, sy = h * 0.17, sr = Math.min(w, h) * 0.065;
+  sctx.save(); sctx.translate(sx, sy); sctx.rotate(t * 0.15);
+  sctx.strokeStyle = '#f2b705'; sctx.lineWidth = 4; sctx.lineCap = 'round'; sctx.beginPath();
+  for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2, l = i % 2 ? 1.45 : 1.7; sctx.moveTo(Math.cos(a) * sr * 1.2, Math.sin(a) * sr * 1.2); sctx.lineTo(Math.cos(a) * sr * l, Math.sin(a) * sr * l); }
+  sctx.stroke(); sctx.restore();
+  sketchFill(sctx, circlePts(sx, sy, sr, 20, 5, 0.04), 5, '#ffd84f', 1.2, 3);
+  sctx.fillStyle = 'rgba(255,255,255,.6)'; sctx.beginPath(); sctx.ellipse(sx - sr * 0.35, sy - sr * 0.35, sr * 0.28, sr * 0.18, -0.6, 0, 7); sctx.fill();
+
+  // Wolken (zwei Ebenen, die vorderen schneller)
+  cloudSprites.forEach((cs, i) => {
+    const farLayer = i < 3, speed = farLayer ? 6 : 13, span = w + cs.w * 2;
+    const cx = ((t * speed + i * 397) % span) - cs.w;
+    const cy = h * (farLayer ? 0.08 + i * 0.07 : 0.06 + (i - 3) * 0.085) + Math.sin(t * 0.4 + i) * 3;
+    sctx.globalAlpha = farLayer ? 0.75 : 1;
+    sctx.drawImage(cs.c, cx, cy, cs.w * (farLayer ? 0.8 : 1), cs.h * (farLayer ? 0.8 : 1));
+  });
+  sctx.globalAlpha = 1;
+
+  // Party auf beleuchteten Plattformen
   const members = party ? [...party.members].sort((a, b) => (a.pid === me.pid ? -1 : b.pid === me.pid ? 1 : 0)) : [];
   const xs = [0.38, 0.62, 0.16, 0.84];
-  const usable = w < 1200 ? w - 260 : w; // rechts Platz für den Spielen-Knopf lassen
-  const sc = clamp(Math.min(usable / 260, h / 200), 1.4, 4.4);
+  const usable = w < 1200 ? w - 260 : w;
+  const sc = clamp(Math.min(usable / 260, h / 210), 1.4, 4.4);
   stageSlots = [];
   for (let i = 0; i < 4; i++) {
-    const x = usable * xs[i], y = h * 0.66;
+    const x = usable * xs[i], y = Math.max(hz + sc * 22, h * 0.7);
     const m = members[i];
-    const plat = ellipsePts(x, y + sc * 24, sc * 36, sc * 10, 22);
+    const py = y + sc * 24, prx = sc * 38, pry = sc * 10.5;
     if (m) {
-      sketchFill(sctx, plat, 90 + i, '#fff6d8', 1.4, 2.5);
+      // Scheinwerfer
+      const glow = sctx.createRadialGradient(x, py - sc * 10, sc * 4, x, py - sc * 10, sc * 60);
+      glow.addColorStop(0, 'rgba(255,244,190,.85)'); glow.addColorStop(1, 'rgba(255,244,190,0)');
+      sctx.fillStyle = glow; sctx.beginPath(); sctx.ellipse(x, py - sc * 10, sc * 60, sc * 46, 0, 0, 7); sctx.fill();
+      // Plattform mit Rand
+      sketchFill(sctx, ellipsePts(x, py + sc * 5, prx, pry, 26), 80 + i, '#c9a970', 1.2, 2.5);
+      sketchFill(sctx, ellipsePts(x, py, prx, pry, 26), 90 + i, i === 0 ? '#ffe9a8' : '#fff6d8', 1.2, 2.5);
+      sctx.strokeStyle = 'rgba(43,38,32,.25)'; sctx.lineWidth = 1.5; sctx.beginPath(); sctx.ellipse(x, py, prx * 0.72, pry * 0.68, 0, 0, 7); sctx.stroke();
+      // Schatten + Panzer (Turm folgt der Maus)
+      sctx.fillStyle = 'rgba(43,38,32,.18)'; sctx.beginPath(); sctx.ellipse(x + sc * 3, py - sc * 2, sc * 22, sc * 7, 0, 0, 7); sctx.fill();
       const aim = Math.atan2(mouse.y - y, mouse.x - x);
       drawTank(sctx, x, y + Math.sin(t * 2 + i) * 2, -0.28 + Math.sin(t * 0.7 + i) * 0.05, aim, m.skin, hashStr(m.pid), { scale: sc });
-      // Namensschild
-      const ny = y - sc * 30;
+      // Namensschild mit Rang
+      const ny = y - sc * 31;
       sctx.font = `${Math.round(14 + sc * 4)}px "Gochi Hand", cursive`; sctx.textAlign = 'center'; sctx.textBaseline = 'middle';
-      const tw = sctx.measureText(m.name).width;
-      sketchFill(sctx, [[x - tw / 2 - 30, ny - 16], [x + tw / 2 + 14, ny - 16], [x + tw / 2 + 14, ny + 16], [x - tw / 2 - 30, ny + 16]], 120 + i, '#ffffff', 1.2, 2.2);
-      sctx.fillStyle = INK; sctx.fillText(m.name, x - 8, ny + 1);
-      drawRankIcon(sctx, m.level, x - tw / 2 - 15, ny - 2, 26);
-      if (m.pid === party.leader && members.length > 1) drawCrown(sctx, x, ny - 28, 1.3);
+      const tw = sctx.measureText(m.name).width, bw = tw + 52;
+      sketchFill(sctx, [[x - bw / 2 + 4, ny - 18], [x + bw / 2, ny - 16], [x + bw / 2 - 4, ny + 17], [x - bw / 2, ny + 16]], 120 + i, '#ffffff', 1, 2.4);
+      sctx.fillStyle = INK; sctx.fillText(m.name, x + 13, ny + 1);
+      drawRankIcon(sctx, m.level, x - bw / 2 + 20, ny - 1, 28);
+      if (m.pid === party.leader && members.length > 1) drawCrown(sctx, x, ny - 30, 1.3);
       if (m.inMatch) {
         sctx.font = '16px "Patrick Hand", sans-serif';
-        sketchFill(sctx, [[x - 40, ny + 20], [x + 40, ny + 20], [x + 40, ny + 40], [x - 40, ny + 40]], 160 + i, '#f2994a', 1, 1.8);
-        sctx.fillStyle = INK; sctx.fillText('IM SPIEL', x, ny + 31);
+        sketchFill(sctx, [[x - 42, ny + 22], [x + 42, ny + 22], [x + 42, ny + 42], [x - 42, ny + 42]], 160 + i, '#f2994a', 1, 1.8);
+        sctx.fillStyle = INK; sctx.fillText('IM SPIEL', x, ny + 33);
       }
     } else {
-      sctx.save(); sctx.setLineDash([8, 7]); sctx.globalAlpha = 0.6;
-      sketchStroke(sctx, plat, 90 + i, 1, true, 2.2); sctx.restore();
+      sctx.save(); sctx.setLineDash([9, 7]); sctx.globalAlpha = 0.7;
+      sctx.fillStyle = 'rgba(255,255,255,.35)'; sctx.beginPath(); sctx.ellipse(x, py, prx, pry, 0, 0, 7); sctx.fill();
+      sctx.strokeStyle = INK; sctx.lineWidth = 2.2; sctx.stroke(); sctx.restore();
       const hover = Math.hypot(mouse.x - x, mouse.y - y) < sc * 26;
-      sketchFill(sctx, circlePts(x, y, sc * (hover ? 14 : 12), 16, 200 + i, 0.06), 200 + i, hover ? '#f2c94c' : '#ffffff', 1.2, 2.4);
-      sctx.strokeStyle = INK; sctx.lineWidth = 3.2; sctx.lineCap = 'round'; sctx.beginPath();
-      sctx.moveTo(x - sc * 5, y); sctx.lineTo(x + sc * 5, y); sctx.moveTo(x, y - sc * 5); sctx.lineTo(x, y + sc * 5); sctx.stroke();
-      sctx.font = '20px "Patrick Hand", sans-serif'; sctx.fillStyle = '#6b6255'; sctx.textAlign = 'center';
-      sctx.fillText('Freund einladen', x, y + sc * 20);
+      const bob = Math.sin(t * 2.2 + i) * 3;
+      sketchFill(sctx, circlePts(x, y + bob, sc * (hover ? 15 : 13), 18, 200 + i, 0.05), 200 + i, hover ? '#f2c94c' : '#ffffff', 1.2, 2.6);
+      sctx.strokeStyle = INK; sctx.lineWidth = 3.4; sctx.lineCap = 'round'; sctx.beginPath();
+      sctx.moveTo(x - sc * 5.5, y + bob); sctx.lineTo(x + sc * 5.5, y + bob); sctx.moveTo(x, y + bob - sc * 5.5); sctx.lineTo(x, y + bob + sc * 5.5); sctx.stroke();
+      sctx.font = '20px "Patrick Hand", sans-serif'; sctx.fillStyle = '#4f5a3a'; sctx.textAlign = 'center'; sctx.textBaseline = 'middle';
+      sctx.fillText('Freund einladen', x, py + sc * 18);
       stageSlots.push({ x, y, r: sc * 28 });
     }
   }

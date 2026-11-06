@@ -2,9 +2,11 @@
 
 Battle Royale mit Panzern im Kritzel-Stil, aus der Vogelperspektive.
 
-- Kampfbus fliegt über die Karte – abspringen (Leertaste/Klick), am Fallschirm landen
-- Lila Sturm zieht sich in 5 Stufen zusammen, das letzte Team gewinnt (Sieg Royale)
-- Freunde per Name hinzufügen, Party einladen (bis 4), als Team spielen; Bots füllen auf (16 Panzer, Squads 20)
+- Gespielt wird auf einer Bergkuppe über den Wolken – wer über die Klippe fährt, stürzt ab
+- Kampfbus fliegt über die Kuppe – abspringen (Leertaste/Klick), am Fallschirm landen
+- Lila Sturm zieht sich in 5 Stufen zusammen (ca. 1:30), das letzte Team gewinnt (Sieg Royale)
+- Große Karte mit M, Einstellungen (Esc / Lobby-Tab): Empfindlichkeit, Tasten, Ton, Grafik, Fadenkreuz, Konto löschen
+- Freunde per Name hinzufügen, Party einladen (bis 4), als Team spielen; Bots füllen auf (8 Panzer pro Runde)
 - 150 Leben, Heilung bei Eliminierung (+50), Selbstreparatur nach 5 s ohne Schaden
 - Blocken mit Shift / E / Rechtsklick (1,2 s, dann 7 s Abklingzeit)
 - Berge befahrbar: oben bist du vor Schüssen von unten geschützt
