@@ -13,17 +13,12 @@ function load(k, def) { try { const v = localStorage.getItem(KEY(k)); return v =
 function save(k, v) { try { localStorage.setItem(KEY(k), JSON.stringify(v)); } catch { /* egal */ } }
 function newPid() { const a = new Uint8Array(14); crypto.getRandomValues(a); return Array.from(a, b => (b % 36).toString(36)).join(''); }
 const profile = {
-  pid: load('pid', null), name: load('name', ''), xp: load('xp', 0),
+  pid: load('pid', null), name: load('name', ''), rp: load('rp', 0),
   skin: load('skin', ['rot', 'blau', 'gruen'][Math.floor(Math.random() * 3)]),
   friends: load('friends', []), recent: load('recent', []), tut: load('tut', false), sound: load('sound', true),
 };
 if (!profile.pid || !/^[a-z0-9]{8,40}$/.test(profile.pid)) { profile.pid = newPid(); save('pid', profile.pid); }
 save('skin', profile.skin);
-function levelInfo(xp) {
-  let lvl = 1, need = 400, rest = xp;
-  while (rest >= need) { rest -= need; lvl++; need = 400 + (lvl - 1) * 100; }
-  return { lvl, rest, need };
-}
 
 // ================= Sound (selbst erzeugt, keine Dateien) =================
 let actx = null;
@@ -66,6 +61,9 @@ const sfx = {
   click: () => tone(600, 0.04, 'triangle', 0.06),
   block: () => { tone(1500, 0.07, 'triangle', 0.09); tone(1100, 0.1, 'sine', 0.07, 0, 0.03); },
   blockOn: () => tone(400, 0.18, 'sine', 0.1, 500),
+  jump: () => { noise(0.5, 0.15, 1800); tone(700, 0.4, 'sine', 0.08, -400); },
+  land: () => { noise(0.25, 0.3, 300); tone(90, 0.2, 'sine', 0.25, -40); },
+  heal: () => { tone(520, 0.12, 'triangle', 0.1); tone(660, 0.12, 'triangle', 0.1, 0, 0.1); tone(880, 0.2, 'triangle', 0.1, 0, 0.2); },
 };
 
 // ================= Verbindung =================
@@ -87,9 +85,9 @@ function connect() {
 }
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
 function login() {
-  send({ t: 'login', pid: profile.pid, name: profile.name, skin: profile.skin, level: levelInfo(profile.xp).lvl, friends: profile.friends });
+  send({ t: 'login', pid: profile.pid, name: profile.name, skin: profile.skin, level: rankInfo(profile.rp).idx, friends: profile.friends });
 }
-function sendProfile() { send({ t: 'profile', skin: profile.skin, level: levelInfo(profile.xp).lvl }); }
+function sendProfile() { send({ t: 'profile', skin: profile.skin, level: rankInfo(profile.rp).idx }); }
 
 function onMsg(m) {
   switch (m.t) {
@@ -162,10 +160,13 @@ $('btnName').onclick = () => { loginMode = 'rename'; showLogin('', 'Speichern');
 
 // ---------- Topbar ----------
 function updateLevelUi() {
-  const li = levelInfo(profile.xp);
-  $('lvlNum').textContent = li.lvl;
-  $('xpBar').style.width = (li.rest / li.need * 100).toFixed(1) + '%';
-  $('xpText').textContent = `${li.rest} / ${li.need} XP`;
+  const ri = rankInfo(profile.rp);
+  const c = $('rankIcon'), x = c.getContext('2d');
+  x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, c.width, c.height);
+  drawRankIcon(x, ri.idx, c.width / 2, c.height * 0.42, c.width * 0.72);
+  $('rankName').textContent = ri.rank.name;
+  $('xpBar').style.width = (ri.last ? 100 : ri.rest / ri.need * 100).toFixed(1) + '%';
+  $('xpText').textContent = ri.last ? `${ri.rest} RP` : `${ri.rest} / ${ri.need} RP`;
 }
 const ICON_SOUND_ON = '<svg viewBox="0 0 24 24" fill="none" stroke="#2b2620" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5c1.3 1.8 1.3 5.2 0 7M19 6c2.6 3.3 2.6 8.7 0 12"/></svg>';
 const ICON_SOUND_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="#2b2620" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>';
@@ -188,14 +189,14 @@ for (const b of document.querySelectorAll('.tab')) {
 // ---------- Spind ----------
 function buildLocker() {
   const box = $('skins'); box.innerHTML = '';
-  const lvl = levelInfo(profile.xp).lvl;
+  const lvl = rankInfo(profile.rp).idx;
   for (const s of SKINS) {
     const locked = lvl < s.lvl;
     const d = el('div', 'skin' + (s.id === profile.skin ? ' on' : '') + (locked ? ' locked' : ''));
     const c = document.createElement('canvas'); c.width = 300; c.height = 200;
     const cx = c.getContext('2d'); cx.scale(2, 2);
     drawTank(cx, 75, 52, -0.3, -0.75, s.id, hashStr(s.id), { scale: 2.1 });
-    d.append(c, el('div', 'n', s.name), el('div', 'l', locked ? `Ab Level ${s.lvl}` : s.id === profile.skin ? 'Ausgerüstet' : 'Freigeschaltet'));
+    d.append(c, el('div', 'n', s.name), el('div', 'l', locked ? `Ab Rang ${rankName(s.lvl)}` : s.id === profile.skin ? 'Ausgerüstet' : 'Freigeschaltet'));
     if (!locked) d.onclick = () => { profile.skin = s.id; save('skin', s.id); sendProfile(); sfx.click(); buildLocker(); };
     box.appendChild(d);
   }
@@ -207,7 +208,7 @@ function isLeader() { return party && party.leader === me.pid; }
 function renderParty() {
   if (!party) return;
   const n = party.members.length;
-  $('modeSub').textContent = n > 1 ? `Team mit ${n} Spielern` : 'Solo';
+  $('modeSub').textContent = (n > 1 ? `Team mit ${n} Spielern` : 'Solo') + ' · Kampfbus · Sturm';
   $('partybox').classList.toggle('hidden', n < 2 || tab !== 'stage');
   const btn = $('btnPlay'), info = $('queueInfo');
   btn.classList.toggle('searching', !!party.queued);
@@ -264,7 +265,7 @@ function renderFriends() {
       const r = el('div', 'row');
       const dot = el('span', 'dot'); dot.style.background = skinOf(mbr.skin).color;
       const who = el('span', 'who', mbr.name + (mbr.pid === me.pid ? ' (du)' : ''));
-      who.appendChild(el('span', 'st', (mbr.pid === party.leader ? 'Leiter · ' : '') + `Level ${mbr.level}` + (mbr.inMatch ? ' · im Spiel' : '')));
+      who.appendChild(el('span', 'st', (mbr.pid === party.leader ? 'Leiter · ' : '') + rankName(mbr.level) + (mbr.inMatch ? ' · im Spiel' : '')));
       r.append(dot, who);
       if (leader && mbr.pid !== me.pid) {
         const x = el('button', 'x', '✕'); x.title = 'Aus Party entfernen'; x.onclick = () => send({ t: 'kick', pid: mbr.pid }); r.appendChild(x);
@@ -401,8 +402,7 @@ function drawStage(time) {
       const tw = sctx.measureText(m.name).width;
       sketchFill(sctx, [[x - tw / 2 - 30, ny - 16], [x + tw / 2 + 14, ny - 16], [x + tw / 2 + 14, ny + 16], [x - tw / 2 - 30, ny + 16]], 120 + i, '#ffffff', 1.2, 2.2);
       sctx.fillStyle = INK; sctx.fillText(m.name, x - 8, ny + 1);
-      sketchFill(sctx, circlePts(x - tw / 2 - 16, ny, 11, 12, 140 + i, 0.08), 140 + i, '#f2c94c', 0.8, 1.8);
-      sctx.font = 'bold 13px "Patrick Hand", sans-serif'; sctx.fillStyle = INK; sctx.fillText(m.level, x - tw / 2 - 16, ny + 1);
+      drawRankIcon(sctx, m.level, x - tw / 2 - 15, ny - 2, 26);
       if (m.pid === party.leader && members.length > 1) drawCrown(sctx, x, ny - 28, 1.3);
       if (m.inMatch) {
         sctx.font = '16px "Patrick Hand", sans-serif';

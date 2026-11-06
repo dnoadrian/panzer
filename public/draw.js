@@ -3,20 +3,20 @@
 const INK = '#2b2620', PAPER = '#f7f1e1', GRID = '#e8dfca';
 
 const SKINS = [
-  { id: 'rot', name: 'Klassik', color: '#e8594f', pat: 'hatch', lvl: 1 },
-  { id: 'blau', name: 'Ozean', color: '#4f86e8', pat: 'hatch', lvl: 1 },
-  { id: 'gruen', name: 'Wald', color: '#4fb85a', pat: 'hatch', lvl: 1 },
-  { id: 'orange', name: 'Kürbis', color: '#e8a94f', pat: 'dots', lvl: 2 },
-  { id: 'lila', name: 'Flieder', color: '#9b6be0', pat: 'stripes', lvl: 3 },
-  { id: 'tuerkis', name: 'Lagune', color: '#3bb8b0', pat: 'dots', lvl: 4 },
-  { id: 'grau', name: 'Stahl', color: '#8a8f98', pat: 'stripes', lvl: 5 },
-  { id: 'pink', name: 'Kaugummi', color: '#ec6fae', pat: 'dots', lvl: 6 },
-  { id: 'tarn', name: 'Tarnfleck', color: '#6f8a4a', pat: 'camo', lvl: 8 },
-  { id: 'wueste', name: 'Wüste', color: '#d6b26a', pat: 'camo', lvl: 10 },
-  { id: 'zebra', name: 'Zebra', color: '#efefef', pat: 'zebra', lvl: 13 },
-  { id: 'gold', name: 'Gold', color: '#e6b422', pat: 'shine', lvl: 16 },
-  { id: 'nacht', name: 'Nacht', color: '#3a3f58', pat: 'stars', lvl: 20 },
-  { id: 'lava', name: 'Lava', color: '#d9472b', pat: 'zigzag', lvl: 25 },
+  { id: 'rot', name: 'Klassik', color: '#e8594f', pat: 'hatch', lvl: 0 },
+  { id: 'blau', name: 'Ozean', color: '#4f86e8', pat: 'hatch', lvl: 0 },
+  { id: 'gruen', name: 'Wald', color: '#4fb85a', pat: 'hatch', lvl: 0 },
+  { id: 'orange', name: 'Kürbis', color: '#e8a94f', pat: 'dots', lvl: 1 },
+  { id: 'lila', name: 'Flieder', color: '#9b6be0', pat: 'stripes', lvl: 2 },
+  { id: 'tuerkis', name: 'Lagune', color: '#3bb8b0', pat: 'dots', lvl: 3 },
+  { id: 'grau', name: 'Stahl', color: '#8a8f98', pat: 'stripes', lvl: 4 },
+  { id: 'pink', name: 'Kaugummi', color: '#ec6fae', pat: 'dots', lvl: 5 },
+  { id: 'tarn', name: 'Tarnfleck', color: '#6f8a4a', pat: 'camo', lvl: 6 },
+  { id: 'wueste', name: 'Wüste', color: '#d6b26a', pat: 'camo', lvl: 7 },
+  { id: 'zebra', name: 'Zebra', color: '#efefef', pat: 'zebra', lvl: 9 },
+  { id: 'gold', name: 'Gold', color: '#e6b422', pat: 'shine', lvl: 11 },
+  { id: 'nacht', name: 'Nacht', color: '#3a3f58', pat: 'stars', lvl: 13 },
+  { id: 'lava', name: 'Lava', color: '#d9472b', pat: 'zigzag', lvl: 15 },
 ];
 const SKIN_BY_ID = Object.fromEntries(SKINS.map(s => [s.id, s]));
 const skinOf = (id) => SKIN_BY_ID[id] || SKINS[0];
@@ -142,4 +142,94 @@ function drawPickup(ctx, type, x, y, seed, s = 1) {
 function drawCrown(ctx, x, y, s = 1) {
   const pts = [[-10, 6], [-10, -4], [-5, 1], [0, -8], [5, 1], [10, -4], [10, 6]].map(([a, b]) => [x + a * s, y + b * s]);
   sketchFill(ctx, pts, 77, '#f2c94c', 0.8, 2);
+}
+
+// ================= Ränge =================
+const RANK_TIERS = [
+  { name: 'Bronze', col: '#d39a5c', dark: '#8a5a2b', shape: 'shield' },
+  { name: 'Silber', col: '#d7dbe2', dark: '#8a909a', shape: 'shield' },
+  { name: 'Gold', col: '#f2c94c', dark: '#b08a1c', shape: 'star' },
+  { name: 'Platin', col: '#8fe0d8', dark: '#3f9a94', shape: 'hex' },
+  { name: 'Diamant', col: '#8fbcff', dark: '#3f6fd0', shape: 'gem' },
+  { name: 'Elite', col: '#6a7090', dark: '#2b2f40', shape: 'elite' },
+  { name: 'Champion', col: '#ff9a55', dark: '#c0402a', shape: 'wings' },
+  { name: 'Unreal', col: '#c39cff', dark: '#6a3fc0', shape: 'burst' },
+];
+const RANKS = [];
+for (let t = 0; t < 5; t++) for (let d = 1; d <= 3; d++) RANKS.push({ tier: t, div: d, name: `${RANK_TIERS[t].name} ${'I'.repeat(d)}` });
+RANKS.push({ tier: 5, div: 0, name: 'Elite' }, { tier: 6, div: 0, name: 'Champion' }, { tier: 7, div: 0, name: 'Unreal' });
+const RP_PER_RANK = 100;
+function rankInfo(rp) {
+  const idx = Math.min(RANKS.length - 1, Math.floor(Math.max(0, rp) / RP_PER_RANK));
+  const last = idx === RANKS.length - 1;
+  return { idx, rank: RANKS[idx], tier: RANK_TIERS[RANKS[idx].tier], rest: last ? rp - idx * RP_PER_RANK : rp % RP_PER_RANK, need: RP_PER_RANK, last };
+}
+const rankName = (idx) => (RANKS[clampIdx(idx)] || RANKS[0]).name;
+function clampIdx(i) { return Math.max(0, Math.min(RANKS.length - 1, i | 0)); }
+
+// Selbstgezeichnetes Rang-Abzeichen. Mittelpunkt x,y; size = ungefähre Breite
+function drawRankIcon(ctx, idx, x, y, size) {
+  const R = RANKS[clampIdx(idx)], T = RANK_TIERS[R.tier], seed = 900 + idx * 7;
+  ctx.save(); ctx.translate(x, y); const k = size / 100; ctx.scale(k, k);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  const shield = [[-34, -38], [34, -38], [36, 6], [0, 42], [-36, 6]];
+  const inner = [[-24, -28], [24, -28], [25, 4], [0, 30], [-25, 4]];
+  const star = (cx, cy, r1, r2, n = 5) => { const p = []; for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + i * Math.PI / n, r = i % 2 ? r2 : r1; p.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } return p; };
+  switch (T.shape) {
+    case 'shield':
+      sketchFill(ctx, shield, seed, T.col, 1.4, 4);
+      sketchFill(ctx, inner, seed + 1, lighten(T.col, 0.35), 1, 2.4, T.dark);
+      break;
+    case 'star':
+      sketchFill(ctx, shield, seed, T.col, 1.4, 4);
+      sketchFill(ctx, inner, seed + 1, lighten(T.col, 0.4), 1, 2.4, T.dark);
+      sketchFill(ctx, star(0, -2, 20, 9), seed + 2, '#fff2b0', 0.8, 2.6);
+      break;
+    case 'hex': {
+      const hex = [], hin = [];
+      for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; hex.push([Math.cos(a) * 42, Math.sin(a) * 42]); hin.push([Math.cos(a) * 28, Math.sin(a) * 28]); }
+      sketchFill(ctx, hex, seed, T.col, 1.4, 4);
+      sketchFill(ctx, hin, seed + 1, lighten(T.col, 0.45), 1, 2.4, T.dark);
+      sketchFill(ctx, [[0, -16], [12, 0], [0, 16], [-12, 0]], seed + 2, '#ffffff', 0.6, 2.4);
+      break;
+    }
+    case 'gem': {
+      const gem = [[-38, -12], [-20, -36], [20, -36], [38, -12], [0, 42]];
+      sketchFill(ctx, gem, seed, T.col, 1.4, 4);
+      ctx.strokeStyle = T.dark; ctx.lineWidth = 2.2; ctx.beginPath();
+      ctx.moveTo(-38, -12); ctx.lineTo(38, -12); ctx.moveTo(-20, -36); ctx.lineTo(-10, -12); ctx.lineTo(0, 42);
+      ctx.moveTo(20, -36); ctx.lineTo(10, -12); ctx.lineTo(0, 42); ctx.moveTo(-10, -12); ctx.lineTo(0, -36); ctx.lineTo(10, -12); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.beginPath(); ctx.moveTo(-22, -16); ctx.lineTo(-14, -30); ctx.lineTo(-8, -16); ctx.closePath(); ctx.fill();
+      break;
+    }
+    case 'elite':
+      sketchFill(ctx, circlePts(0, 0, 40, 22, seed, 0.03), seed, T.col, 1.4, 4);
+      ctx.strokeStyle = '#f2c94c'; ctx.lineWidth = 3;
+      for (const sgn of [-1, 1]) { ctx.beginPath(); ctx.arc(0, 4, 30, Math.PI / 2 + sgn * 0.3, Math.PI / 2 + sgn * 2.3, sgn < 0); ctx.stroke();
+        for (let i = 0; i < 4; i++) { const a = Math.PI / 2 + sgn * (0.6 + i * 0.45); ctx.beginPath(); ctx.ellipse(Math.cos(a) * 30, 4 + Math.sin(a) * 30, 7, 3, a + sgn * 0.8, 0, 7); ctx.fillStyle = '#f2c94c'; ctx.fill(); } }
+      sketchFill(ctx, star(0, -2, 17, 7), seed + 2, '#f2c94c', 0.8, 2.4);
+      break;
+    case 'wings':
+      for (const sgn of [-1, 1]) {
+        const w = [[sgn * 18, -18], [sgn * 50, -34], [sgn * 46, -16], [sgn * 54, -8], [sgn * 44, 2], [sgn * 48, 12], [sgn * 20, 14]];
+        sketchFill(ctx, w, seed + (sgn > 0 ? 5 : 6), '#ffffff', 1, 3);
+      }
+      sketchFill(ctx, [[-24, -36], [24, -36], [26, 4], [0, 38], [-26, 4]], seed, T.col, 1.4, 4);
+      sketchFill(ctx, [[0, -26], [10, -6], [6, -8], [8, 12], [0, 24], [-8, 12], [-6, -8], [-10, -6]], seed + 2, '#ffd25c', 0.8, 2.2);
+      break;
+    case 'burst':
+      sketchFill(ctx, star(0, 0, 46, 26, 8), seed, T.col, 1.4, 4);
+      sketchFill(ctx, circlePts(0, 0, 20, 14, seed + 1, 0.05), seed + 1, '#ffffff', 1, 2.6);
+      sketchFill(ctx, star(0, 0, 13, 5, 4), seed + 2, T.dark, 0.6, 1.6);
+      break;
+  }
+  // Stufe I-III als kleine Winkel unten
+  if (R.div) {
+    for (let i = 0; i < R.div; i++) {
+      const cy = 46 + i * 9;
+      ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-12, cy - 4); ctx.lineTo(0, cy + 3); ctx.lineTo(12, cy - 4); ctx.stroke();
+      ctx.strokeStyle = '#f2c94c'; ctx.lineWidth = 2.6; ctx.stroke();
+    }
+  }
+  ctx.restore();
 }

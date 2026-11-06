@@ -27,7 +27,7 @@ resetG();
 
 function startGame(m) {
   resetG();
-  G.map = m.map; G.maxHp = m.maxHp; G.bushMax = m.bushHp;
+  G.map = m.map; G.maxHp = m.maxHp; G.bushMax = 1; G.bus = m.bus; G.blockCd = m.blockCd;
   G.bushes = m.map.bushes.map(b => ({ ...b }));
   for (const r of m.roster) G.roster.set(r.id, r);
   G.myTeam = m.myTeam; G.teamSize = m.roster.filter(r => r.team === m.myTeam).length;
@@ -53,13 +53,15 @@ $('btnWatch').onclick = () => { $('resultCard').classList.add('hidden'); $('deat
 
 function runTutorial() {
   const tips = [
+    'Leertaste oder Klick: aus dem Kampfbus springen',
+    'Am Fallschirm mit WASD steuern',
     'WASD fahren · Maus zielen · Klick schießen',
-    'Bleib in der Zone – draußen verlierst du Leben',
+    'Bleib im Kreis – im Sturm verlierst du Leben',
     'Shift oder Rechtsklick: kurz alle Treffer blocken',
     'Im Busch bist du unsichtbar',
     'Feinde im Busch? Erst den Busch zerschießen!',
     'Oben auf dem Berg treffen dich Schüsse von unten nicht',
-    'Sammle Kisten: Reparatur, Tempo, Kanone und mehr',
+    'Ohne Schaden repariert sich dein Panzer langsam',
   ];
   const box = $('tutorial');
   tips.forEach((tip, i) => {
@@ -143,7 +145,7 @@ function processSnap(s, late) {
       case 'dirt': G.effects.push({ k: 'dirt', x: e.x, y: e.y, t0: now, life: 450 }); sfx.dirt(volAt(e.x, e.y)); break;
       case 'bush':
         G.bushHit.set(e.i, now);
-        leafBurst(e.x, e.y, e.hp > 0 ? 8 : 30);
+        leafBurst(e.x, e.y, 40);
         if (volAt(e.x, e.y) > 0) sfx.bush(volAt(e.x, e.y));
         break;
       case 'tp': G.effects.push({ k: 'tp', x: e.x, y: e.y, t0: now, life: 600 }); break;
@@ -152,16 +154,22 @@ function processSnap(s, late) {
         if (e.by === me.pid || e.v === me.pid || volAt(e.x, e.y) > 0.3) sfx.block();
         break;
       case 'blockOn': if (e.i === me.pid) sfx.blockOn(); break;
-      case 'pick': G.effects.push({ k: 'pick', x: e.x, y: e.y, type: e.type, t0: now, life: 900 }); if (e.by === me.pid) sfx.pick(); break;
+      case 'heal':
+        G.floats.push({ x: e.x, y: e.y - 34, text: '+' + e.d, col: '#6fcf6f', t0: now });
+        if (e.i === me.pid) sfx.heal();
+        break;
+      case 'jump': if (e.i === me.pid) { sfx.jump(); centerMsg(null, 'Mit WASD zum Landeplatz steuern', 2600); } break;
+      case 'land': G.effects.push({ k: 'land', x: e.x, y: e.y, t0: now, life: 600 }); if (e.i === me.pid) { sfx.land(); G.shake = 8; } break;
       case 'elim': if (e.by === me.pid) { centerMsg('ERLEDIGT', e.vn, 1500); sfx.kill(); } break;
-      case 'zone': centerMsg('Die Zone schrumpft!', null, 1800); sfx.zone(); break;
+      case 'zone': centerMsg('Der Sturm zieht sich zusammen!', null, 2000); sfx.zone(); break;
+      case 'over': break;
     }
   }
-  if (s.cd > 0) {
-    const n = Math.ceil(s.cd);
-    if (n !== G.lastCd) { G.lastCd = n; centerMsg(String(n), null, 900); sfx.tick(); }
-  } else if (G.lastCd !== 0) { G.lastCd = 0; centerMsg('LOS!', null, 900); sfx.go(); }
-  if (s.z.st === 'wait' && s.z.left < 10.5 && !G.warned) { G.warned = true; centerMsg(null, 'Zone schrumpft in 10 Sekunden', 1800); }
+  if (s.bus && s.bus.wait > 0) {
+    const n = Math.ceil(s.bus.wait);
+    if (n !== G.lastCd) { G.lastCd = n; centerMsg(String(n), 'Der Kampfbus startet', 900); sfx.tick(); }
+  } else if (s.bus && G.lastCd !== 0) { G.lastCd = 0; centerMsg('ABSPRINGEN!', 'Leertaste oder Klick', 1400); sfx.go(); }
+  if (s.z.st === 'wait' && s.z.left < 10.5 && !G.warned && !s.bus) { G.warned = true; centerMsg(null, 'Der Sturm zieht in 10 Sekunden zu', 1800); }
   if (s.z.st !== 'wait') G.warned = false;
   updateHud(s);
 }
@@ -171,7 +179,7 @@ function updateHud(s) {
   setText('hAlive', String(s.al));
   setText('hKills', String(s.me.kills));
   const z = s.z;
-  setText('zoneInfo', z.st === 'wait' ? `Zone schrumpft in ${fmt(z.left)}` : z.st === 'shrink' ? 'Die Zone zieht sich zusammen!' : 'Letzte Zone');
+  setText('zoneInfo', s.bus ? `Kampfbus: ${s.bus.n} noch an Bord` : z.st === 'wait' ? `Sturm zieht zu in ${fmt(z.left)}` : z.st === 'shrink' ? 'Der Sturm zieht sich zusammen!' : 'Letzter Kreis');
   const myT = s.tanks.find(t => t.i === me.pid);
   const outside = !!myT && Math.hypot(myT.x - z.x, myT.y - z.y) > z.r;
   $('zoneInfo').classList.toggle('warn', outside || z.st === 'shrink');
@@ -199,7 +207,7 @@ function updateHud(s) {
     const box = $('chips'); box.innerHTML = '';
     for (const [t, txt] of chips) {
       const c = el('span', 'chip', txt);
-      c.style.background = t === 'B' ? (txt.startsWith('Blocken in') ? '#e6e0d2' : '#cfe0ff') : PICKUPS[t].color;
+      c.style.background = txt.startsWith('Blocken in') ? '#e6e0d2' : '#cfe0ff';
       box.appendChild(c);
     }
   }
@@ -222,8 +230,9 @@ function updateHud(s) {
 }
 
 function onDead(m) {
-  G.deathText = m.by ? `Erledigt von ${m.by}` : m.cause === 'zone' ? 'Die Zone hat dich erwischt' : '';
+  G.deathText = m.by ? `Erledigt von ${m.by}` : m.cause === 'zone' ? 'Der Sturm hat dich erwischt' : '';
   if (!G.result) $('deathCard').classList.remove('hidden');
+  $('deathCard').querySelector('.t').textContent = m.place ? `#${m.place}  Eliminiert` : 'Eliminiert';
   setText('deathBy', G.deathText);
   $('vignette').style.opacity = 0;
   G.pred = null;
@@ -231,25 +240,32 @@ function onDead(m) {
 }
 
 function onResult(m) {
-  let xp = 50 + m.kills * 120 + Math.round(m.dmg * 0.8);
-  if (m.win) xp += 500; else if (m.place <= 3) xp += 200; else if (m.place <= Math.ceil(m.teams / 2)) xp += 80;
-  const before = levelInfo(profile.xp).lvl;
-  profile.xp += xp; save('xp', profile.xp);
-  const after = levelInfo(profile.xp).lvl;
+  // Rangpunkte: Platzierung + Eliminierungen - Einsatz (höhere Ränge kosten mehr)
+  const r0 = rankInfo(profile.rp), tier = r0.rank.tier;
+  let place = m.win ? 60 : m.place <= 2 ? 40 : m.place <= 3 ? 30 : m.place <= Math.ceil(m.teams / 2) ? 15 : 0;
+  let xp = place + m.kills * 12 - [0, 5, 10, 15, 20, 25, 30, 35][tier];
+  const floor = r0.rank.div ? (r0.idx - (r0.rank.div - 1)) * RP_PER_RANK : r0.idx * RP_PER_RANK; // Rangstufe kann man nicht verlieren
+  const newRp = Math.max(floor, profile.rp + xp);
+  xp = newRp - profile.rp;
+  const before = r0.idx;
+  profile.rp = newRp; save('rp', profile.rp);
+  const after = rankInfo(profile.rp).idx;
   for (const p of m.players) { profile.recent = profile.recent.filter(r => r.pid !== p.pid); profile.recent.unshift(p); }
   profile.recent = profile.recent.slice(0, 10); save('recent', profile.recent);
   if (after > before) {
     const unlocked = SKINS.filter(s => s.lvl > before && s.lvl <= after).map(s => s.name);
-    setTimeout(() => toast(`Level ${after} erreicht!` + (unlocked.length ? ` Neu im Spind: ${unlocked.join(', ')}` : '')), 900);
+    setTimeout(() => { toast(`Aufgestiegen: ${rankName(after)}!` + (unlocked.length ? ` Neu im Spind: ${unlocked.join(', ')}` : '')); sfx.win(); }, 900);
     sendProfile();
   }
   updateLevelUi();
-  if (!inGame || !m.inMatch) { toast(m.win ? `Dein Team hat gewonnen! +${xp} XP` : `Platz ${m.place}  +${xp} XP`); return; }
+  if (!inGame || !m.inMatch) { toast(m.win ? `Sieg Royale für dein Team! ${xp >= 0 ? '+' : ''}${xp} RP` : `#${m.place}  ${xp >= 0 ? '+' : ''}${xp} RP`); return; }
   G.result = m;
   $('deathCard').classList.add('hidden');
-  $('resTitle').textContent = m.win ? 'SIEG!' : `Platz ${m.place}`;
+  $('resTitle').textContent = m.win ? 'SIEG ROYALE!' : `#${m.place}`;
   $('resSub').textContent = m.win ? 'Dein Team ist als letztes übrig.' : `von ${m.teams} Teams`;
-  $('resKills').textContent = m.kills; $('resDmg').textContent = m.dmg; $('resXp').textContent = '+' + xp;
+  $('resKills').textContent = m.kills; $('resDmg').textContent = m.dmg; $('resXp').textContent = (xp >= 0 ? '+' : '') + xp;
+  { const c = $('resRank'), x = c.getContext('2d'); x.clearRect(0, 0, c.width, c.height); drawRankIcon(x, after, 100, 86, 130); }
+  $('resSub').textContent += `  ·  ${rankName(after)}` + (after > before ? '  ·  AUFGESTIEGEN!' : '');
   $('btnWatch').classList.toggle('hidden', !!m.win);
   $('resultCard').classList.remove('hidden');
   if (m.win) {
@@ -283,7 +299,7 @@ function readMove() {
 function screenToWorld(sx, sy) { const z = G.cam.z; return { x: G.cam.x + (sx - innerWidth / 2) / z, y: G.cam.y + (sy - innerHeight / 2) / z }; }
 setInterval(() => {
   const s = G.snaps[G.snaps.length - 1];
-  if (!inGame || !s || !s.me.alive || s.cd > 0) return;
+  if (!inGame || !s || !s.me.alive) return;
   const { dx, dy } = readMove();
   send({ t: 'input', dx, dy, aim: G.aim, fire: gm.down || !!keys[' '], block: !!(gm.rdown || keys['shift'] || keys['e']) });
 }, 33);
@@ -493,7 +509,7 @@ function bushSprite(b, i, keep) {
   return sp;
 }
 function drawBush(b, i, nowMs, friendly, occupied) {
-  const keep = bushKeep(b);
+  const keep = bushModel(b, i).puffs.length;
   const sp = bushSprite(b, i, keep);
   const hitT = G.bushHit.get(i) || 0, hp = clamp(1 - (nowMs - hitT) / 260, 0, 1);
   const t = nowMs / 1000;
@@ -544,10 +560,16 @@ function drawMini(s) {
   const z = s.z;
   mctx.save();
   mctx.beginPath(); mctx.rect(0, 0, w, w); mctx.arc(z.x * k, z.y * k, Math.max(0, z.r * k), 0, Math.PI * 2, true);
-  mctx.fillStyle = 'rgba(80,100,230,.28)'; mctx.fill('evenodd');
-  mctx.strokeStyle = '#4a5fd0'; mctx.lineWidth = 2; mctx.beginPath(); mctx.arc(z.x * k, z.y * k, Math.max(0, z.r * k), 0, 7); mctx.stroke();
+  mctx.fillStyle = 'rgba(140,60,210,.32)'; mctx.fill('evenodd');
+  mctx.strokeStyle = '#8a3fd0'; mctx.lineWidth = 2; mctx.beginPath(); mctx.arc(z.x * k, z.y * k, Math.max(0, z.r * k), 0, 7); mctx.stroke();
   if (z.st !== 'done') { mctx.setLineDash([4, 3]); mctx.strokeStyle = '#ffffff'; mctx.lineWidth = 2; mctx.beginPath(); mctx.arc(z.tx * k, z.ty * k, Math.max(0, z.tr * k), 0, 7); mctx.stroke(); mctx.setLineDash([]); }
   mctx.restore();
+  if (s.bus && G.bus) {
+    mctx.save(); mctx.setLineDash([5, 4]); mctx.strokeStyle = INK; mctx.lineWidth = 1.5;
+    mctx.beginPath(); mctx.moveTo(G.bus.x0 * k, G.bus.y0 * k); mctx.lineTo(G.bus.x1 * k, G.bus.y1 * k); mctx.stroke(); mctx.restore();
+    mctx.fillStyle = '#4f86e8'; mctx.strokeStyle = INK; mctx.lineWidth = 1.5;
+    mctx.beginPath(); mctx.arc(s.bus.x * k, s.bus.y * k, 6, 0, 7); mctx.fill(); mctx.stroke();
+  }
   for (const [id, x, y, alive] of s.mates) {
     if (!alive || id === me.pid) continue;
     mctx.fillStyle = '#6fcf6f'; mctx.strokeStyle = INK; mctx.lineWidth = 1.5;
@@ -565,10 +587,10 @@ function drawMini(s) {
 // ---------- Eigener Panzer: sofort reagieren (Vorhersage) ----------
 function predictMe(dt, s) {
   const L = G.newMe;
-  if (!L || !s.me.alive) { G.pred = null; return null; }
+  if (!L || !s.me.alive || s.me.ph !== 0) { G.pred = null; return null; }
   if (!G.pred) G.pred = { x: L.x, y: L.y };
   const P = G.pred;
-  if (s.cd <= 0) {
+  {
     const { dx, dy } = readMove();
     const len = Math.hypot(dx, dy);
     if (len > 0) {
@@ -576,7 +598,7 @@ function predictMe(dt, s) {
       const h0 = heightAt(P.x, P.y), h1 = heightAt(P.x + nx * 6, P.y + ny * 6);
       const sl = clamp((h1 - h0) / 6 * SLOPE_W, -1, 1);
       const f = sl > 0 ? 1 - 0.55 * sl : 1 - 0.3 * sl;
-      const sp = SPEED * (s.me.sp > 0 ? 1.45 : 1) * (s.me.bk ? 0.6 : 1) * f;
+      const sp = SPEED * (s.me.bk ? 0.6 : 1) * f;
       P.x += nx * sp * dt; P.y += ny * sp * dt;
       const MAP = G.map.size;
       P.x = clamp(P.x, TR, MAP - TR); P.y = clamp(P.y, TR, MAP - TR);
@@ -596,6 +618,66 @@ function predictMe(dt, s) {
   if (err > 70) { P.x = L.x; P.y = L.y; } // z. B. Teleporter
   else { const c = Math.min(1, dt * 6); P.x += ex * c; P.y += ey * c; }
   return P;
+}
+
+// ---------- Fallschirm & Kampfbus ----------
+function drawChute(x, y, sc, color, seed, t) {
+  const cy = y - 46 * sc, R = 36 * sc, sway = Math.sin(t * 2 + seed) * 0.08;
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(sway); ctx.translate(-x, -y);
+  ctx.strokeStyle = INK; ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  for (const ox of [-0.9, -0.35, 0.35, 0.9]) { ctx.moveTo(x + ox * R, cy + 2); ctx.lineTo(x + ox * 10 * sc, y - 8 * sc); }
+  ctx.stroke();
+  // Schirm: Kuppel mit Streifen
+  const pts = [];
+  for (let i = 0; i <= 16; i++) { const a = Math.PI + i / 16 * Math.PI; pts.push([x + Math.cos(a) * R, cy + Math.sin(a) * R * 0.75]); }
+  for (let i = 1; i < 6; i++) pts.push([x + R - i * (2 * R / 6), cy + (i % 2 ? 5 : 0)]);
+  sketchFill(ctx, pts, seed + 3, '#ffffff', 1.2, 2.4);
+  ctx.save(); poly(ctx, pts); ctx.clip();
+  ctx.fillStyle = color;
+  for (let i = 0; i < 6; i += 2) ctx.fillRect(x - R + i * (2 * R / 6), cy - R, 2 * R / 6, R + 6);
+  ctx.restore();
+  sketchStroke(ctx, pts, seed + 3, 1.2, true, 2.4);
+  ctx.restore();
+}
+function drawBus(bus, s, t, inBus) {
+  const r = G.bus, a = Math.atan2(r.y1 - r.y0, r.x1 - r.x0);
+  // gestrichelte Flugroute
+  ctx.save(); ctx.setLineDash([26, 18]); ctx.lineDashOffset = -t * 40;
+  ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 9;
+  ctx.beginPath(); ctx.moveTo(bus.x, bus.y); ctx.lineTo(r.x1, r.y1); ctx.stroke();
+  ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(bus.x, bus.y);
+  const bz = 0.55 / G.cam.z; ctx.scale(bz, bz); // Bus bleibt auf dem Bildschirm gleich groß
+  // Schatten tief unten
+  ctx.fillStyle = 'rgba(43,38,32,.12)'; ctx.beginPath(); ctx.ellipse(120, 140, 90, 50, a, 0, 7); ctx.fill();
+  ctx.rotate(a);
+  ctx.scale(1.6, 1.6);
+  // Bus-Körper
+  sketchFill(ctx, rectPts(-62, -26, 124, 52), 501, '#4f86e8', 1.6, 3);
+  ctx.fillStyle = '#ffffff';
+  for (let i = 0; i < 5; i++) { ctx.fillRect(-50 + i * 22, -20, 14, 10); ctx.fillRect(-50 + i * 22, 10, 14, 10); }
+  ctx.strokeStyle = INK; ctx.lineWidth = 1.6;
+  for (let i = 0; i < 5; i++) { ctx.strokeRect(-50 + i * 22, -20, 14, 10); ctx.strokeRect(-50 + i * 22, 10, 14, 10); }
+  sketchFill(ctx, rectPts(46, -22, 14, 44), 502, '#cfe3ff', 1, 2);
+  // Ballon darüber
+  sketchFill(ctx, circlePts(-4, 0, 44, 22, 503, 0.04), 503, '#f2c94c', 1.6, 3);
+  ctx.save(); poly(ctx, circlePts(-4, 0, 44, 22, 503, 0.04)); ctx.clip();
+  ctx.fillStyle = '#e8594f';
+  for (let i = -3; i <= 3; i += 2) ctx.fillRect(-4 + i * 12 - 6, -50, 12, 100);
+  ctx.restore();
+  sketchStroke(ctx, circlePts(-4, 0, 44, 22, 503, 0.04), 503, 1.4, true, 3);
+  // Propeller
+  ctx.save(); ctx.translate(-66, 0); ctx.rotate(t * 25);
+  ctx.strokeStyle = INK; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(0, 14); ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+  ctx.font = `bold ${Math.round(30 / G.cam.z)}px "Gochi Hand", cursive`; ctx.textAlign = 'center';
+  ctx.lineWidth = 6 / G.cam.z; ctx.strokeStyle = '#fff'; ctx.strokeText(inBus ? 'DU BIST IM KAMPFBUS' : 'KAMPFBUS', bus.x, bus.y - 120 / G.cam.z);
+  ctx.fillStyle = INK; ctx.fillText(inBus ? 'DU BIST IM KAMPFBUS' : 'KAMPFBUS', bus.x, bus.y - 120 / G.cam.z);
 }
 
 // ---------- Hauptzeichnung ----------
@@ -626,7 +708,7 @@ function drawGame(nowMs) {
     return { ...tk, x: lerp(tk.x, n.x, k), y: lerp(tk.y, n.y, k), a: lerpAng(tk.a, n.a, k), ta: lerpAng(tk.ta, n.ta, k), h: lerp(tk.h, n.h, k), hp: n.hp };
   });
   const nB = nxt ? new Map(nxt.b.map(b => [b[0], b])) : null;
-  const bullets = s.b.map(b => { const n = nB && nB.get(b[0]); return n ? [lerp(b[1], n[1], k), lerp(b[2], n[2], k), b[3]] : [b[1], b[2], b[3]]; });
+  const bullets = s.b.map(b => { const n = nB && nB.get(b[0]); return n ? [lerp(b[1], n[1], k), lerp(b[2], n[2], k), b[3], b[4]] : [b[1], b[2], b[3], b[4]]; });
 
   // eigener Panzer: vorhergesagt + Zielen sofort
   const latest = G.snaps[G.snaps.length - 1];
@@ -634,15 +716,23 @@ function drawGame(nowMs) {
   let myT = tanks.find(t => t.i === me.pid);
   if (P && myT) { myT.x = P.x; myT.y = P.y; myT.h = heightAt(P.x, P.y); }
 
+  // Kampfbus (interpoliert)
+  let bus = null;
+  if (s.bus) {
+    bus = { ...s.bus };
+    if (nxt && nxt.bus) { bus.x = lerp(s.bus.x, nxt.bus.x, k); bus.y = lerp(s.bus.y, nxt.bus.y, k); }
+  }
+  const inBus = s.me.alive && s.me.ph === 1 && bus;
   const focus = tanks.find(t => t.i === s.f);
   const cam = G.cam;
-  if (focus) {
-    if (!cam.init) { cam.x = focus.x; cam.y = focus.y; cam.init = true; }
-    const ff = focus === myT ? 1 : Math.min(1, dt * 10);
-    cam.x += (focus.x - cam.x) * ff; cam.y += (focus.y - cam.y) * ff;
+  const fp = inBus ? bus : focus;
+  if (fp) {
+    if (!cam.init) { cam.x = fp.x; cam.y = fp.y; cam.init = true; }
+    const ff = (focus && focus === myT) || inBus ? 1 : Math.min(1, dt * 10);
+    cam.x += (fp.x - cam.x) * ff; cam.y += (fp.y - cam.y) * ff;
   }
   const baseZ = Math.max(0.5, Math.min(w / 1100, h / 700));
-  const zt = baseZ / (1 + 0.22 * (focus ? focus.h : 0));
+  const zt = inBus ? baseZ * 0.42 : baseZ / (1 + 0.22 * (focus ? focus.h : 0)) / (1 + 1.3 * (focus ? focus.alt || 0 : 0));
   cam.z += (zt - cam.z) * Math.min(1, dt * 3);
   const z = cam.z;
   G.shake *= Math.pow(0.002, dt);
@@ -665,32 +755,23 @@ function drawGame(nowMs) {
     ctx.beginPath(); ctx.arc(tp.x, tp.y, 3.5, 0, 7); ctx.fillStyle = INK; ctx.fill(); ctx.restore();
   });
   // 3) zerstörte Büsche (am Boden)
-  G.bushes.forEach((b, i) => { b._i = i; if (b.hp <= 0 && vis(b, b.r + 30)) drawBush(b, i, nowMs, false, false); });
+
   // 4) Kisten
-  for (const [id, type, x, y] of s.p) {
-    if (!vis({ x, y }, 20)) continue;
-    const sp = pickupSprite(type), bob = Math.sin(t * 3 + (hashStr(id) % 7)) * 2.5;
-    ctx.drawImage(sp.c, x - sp.R + 1, y - sp.R + 1 + bob, sp.R * 2, sp.R * 2);
-  }
+
   // 5) Panzer (höhere oben)
   tanks.sort((a, b) => a.h - b.h);
   const occ = new Set(s.occ);
   const friendlyBush = new Set();
   for (const tk of tanks) {
-    if (!vis(tk, 40)) continue;
+    if (!vis(tk, 40) || tk.ph === 2) continue;
     const mine = teamOf(tk.i) === G.myTeam;
     const bi = bushIdx(tk.x, tk.y);
     if (bi >= 0 && mine) friendlyBush.add(bi);
-    const sc = 1.12 + 0.16 * tk.h;
+    const air = tk.ph === 2 ? tk.alt : 0;
+    const sc = (1.12 + 0.16 * tk.h) * (1 + 0.7 * air);
     ctx.fillStyle = 'rgba(43,38,32,.13)';
-    ctx.beginPath(); ctx.ellipse(tk.x + 3 + 7 * tk.h, tk.y + 4 + 9 * tk.h, 21 * sc, 17 * sc, 0, 0, 7); ctx.fill();
-    if (tk.sp) {
-      ctx.strokeStyle = '#b7ab94'; ctx.lineWidth = 1.5;
-      for (let j = 1; j <= 3; j++) { ctx.beginPath(); ctx.arc(tk.x - Math.cos(tk.a) * (16 + j * 8), tk.y - Math.sin(tk.a) * (16 + j * 8), 2 + j, 0, 7); ctx.stroke(); }
-    }
-    drawTank(ctx, tk.x, tk.y, tk.a, tk.ta, skinIdOf(tk.i), hashStr(tk.i), {
-      scale: sc, flash: (G.flash.get(tk.i) || 0) > nowMs, double: !!tk.df, cannon: tk.i === me.pid ? s.me.k : 0,
-    });
+    ctx.beginPath(); ctx.ellipse(tk.x + 3 + 7 * tk.h + 60 * air, tk.y + 4 + 9 * tk.h + 70 * air, 21 * (1.12 + 0.16 * tk.h), 17 * (1.12 + 0.16 * tk.h), 0, 0, 7); ctx.fill();
+    drawTank(ctx, tk.x, tk.y, tk.a, tk.ta, skinIdOf(tk.i), hashStr(tk.i), { scale: sc, flash: (G.flash.get(tk.i) || 0) > nowMs });
     if (tk.bk) { // Block-Schild
       const R = 27 * sc;
       ctx.save();
@@ -702,10 +783,18 @@ function drawGame(nowMs) {
     }
   }
   // 6) Kugeln
-  for (const [x, y, friendly] of bullets) {
-    if (!vis({ x, y }, 10)) continue;
-    ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(x, y, 4.6, 0, 7); ctx.fill();
-    ctx.fillStyle = friendly ? '#f2c94c' : '#e8594f'; ctx.beginPath(); ctx.arc(x, y, 2.4, 0, 7); ctx.fill();
+  ctx.lineCap = 'round';
+  for (const [x, y, friendly, a] of bullets) {
+    if (!vis({ x, y }, 40)) continue;
+    const col = friendly ? '#f2b705' : '#e8402f', cx = Math.cos(a || 0), cy = Math.sin(a || 0);
+    // Leuchtspur
+    const g = ctx.createLinearGradient(x - cx * 38, y - cy * 38, x, y);
+    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, col);
+    ctx.strokeStyle = g; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(x - cx * 38, y - cy * 38); ctx.lineTo(x, y); ctx.stroke();
+    // Geschoss
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.ellipse(x, y, 7.5, 5, a || 0, 0, 7); ctx.fill();
+    ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, 5, 3, a || 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fff6c8'; ctx.beginPath(); ctx.arc(x + cx * 1.5 - cy * 1, y + cy * 1.5 + cx * 1, 1.4, 0, 7); ctx.fill();
   }
   // 7) intakte Büsche über den Panzern, mit Blättern wenn jemand drin ist
   G.bushes.forEach((b, i) => {
@@ -728,6 +817,20 @@ function drawGame(nowMs) {
     ctx.fillStyle = '#fff'; ctx.fillRect(tk.x - 20, y - 3, 40, 6);
     ctx.fillStyle = mine ? '#6fcf6f' : '#e8594f'; ctx.fillRect(tk.x - 20, y - 3, 40 * clamp(tk.hp / G.maxHp, 0, 1), 6);
     ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.strokeRect(tk.x - 20, y - 3, 40, 6);
+  }
+  // 8b) Panzer am Fallschirm
+  for (const tk of tanks) {
+    if (tk.ph !== 2 || !vis(tk, 120)) continue;
+    const sc = 1.12 * (1 + 0.7 * tk.alt);
+    ctx.fillStyle = 'rgba(43,38,32,.12)';
+    ctx.beginPath(); ctx.ellipse(tk.x + 60 * tk.alt, tk.y + 70 * tk.alt, 23, 19, 0, 0, 7); ctx.fill();
+    drawTank(ctx, tk.x, tk.y, tk.a, tk.ta, skinIdOf(tk.i), hashStr(tk.i), { scale: sc });
+    drawChute(tk.x, tk.y, sc, skinOf(skinIdOf(tk.i)).color, hashStr(tk.i), t);
+    if (tk.i !== me.pid) {
+      ctx.font = '15px "Patrick Hand", sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = teamOf(tk.i) === G.myTeam ? '#2f8a3a' : INK;
+      ctx.fillText(nameOf(tk.i), tk.x, tk.y - 74 * sc);
+    }
   }
   // 9) Partikel, Effekte, Zahlen
   G.particles = G.particles.filter(p => (p.t += dt) < p.life);
@@ -766,10 +869,9 @@ function drawGame(nowMs) {
       ctx.stroke();
     } else if (e.k === 'tp') {
       ctx.strokeStyle = '#9a6cff'; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(e.x, e.y, 10 + p * 36, 0, 7); ctx.stroke();
-    } else if (e.k === 'pick') {
-      ctx.strokeStyle = '#e0a400'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(e.x, e.y, 10 + p * 28, 0, 7); ctx.stroke();
-      ctx.fillStyle = INK; ctx.font = 'bold 17px "Patrick Hand", sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(PICKUPS[e.type].name + '!', e.x, e.y - 22 - p * 22);
+    } else if (e.k === 'land') {
+      ctx.fillStyle = '#c9b68c';
+      for (let j = 0; j < 10; j++) { const a = j / 10 * 6.28; ctx.beginPath(); ctx.arc(e.x + Math.cos(a) * (14 + p * 30), e.y + Math.sin(a) * (14 + p * 30), 5 * (1 - p) + 2, 0, 7); ctx.fill(); }
     }
     ctx.restore();
   }
@@ -787,16 +889,16 @@ function drawGame(nowMs) {
   ctx.save();
   ctx.beginPath(); ctx.rect(vx0 - 100, vy0 - 100, vx1 - vx0 + 200, vy1 - vy0 + 200);
   ctx.arc(zn.x, zn.y, Math.max(0, zn.r), 0, Math.PI * 2, true);
-  ctx.fillStyle = 'rgba(80,100,230,.17)'; ctx.fill('evenodd');
+  ctx.fillStyle = 'rgba(140,60,210,.2)'; ctx.fill('evenodd');
   ctx.clip('evenodd');
-  ctx.strokeStyle = 'rgba(70,90,210,.28)'; ctx.lineWidth = 2; ctx.beginPath();
+  ctx.strokeStyle = 'rgba(120,50,190,.3)'; ctx.lineWidth = 2; ctx.beginPath();
   const hs = vy1 - vy0;
   for (let x = Math.floor((vx0 - hs) / 26) * 26; x < vx1; x += 26) { ctx.moveTo(x, vy1); ctx.lineTo(x + hs, vy0); }
   ctx.stroke();
   ctx.restore();
   if (zn.r > 0 && Math.hypot(clamp(cam.x, zn.x - zn.r, zn.x + zn.r) - cam.x, 0) < 1e9) {
     const n = Math.round(clamp(zn.r / 10, 30, 220));
-    sketchStroke(ctx, circlePts(zn.x, zn.y, zn.r, n, 7, 0.004), 7, 2, true, 5, '#4a5fd0');
+    sketchStroke(ctx, circlePts(zn.x, zn.y, zn.r, n, 7, 0.004), 7, 2, true, 5, '#8a3fd0');
   }
   if (zn.st !== 'done' && zn.tr > 0) {
     ctx.save(); ctx.setLineDash([18, 14]); ctx.lineDashOffset = -t * 20;
@@ -804,9 +906,17 @@ function drawGame(nowMs) {
     ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.stroke(); ctx.restore();
   }
 
+  // 10b) Kampfbus
+  if (bus) drawBus(bus, s, t, inBus);
+
   // 11) Bildschirm: Fadenkreuz, Konfetti
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  if (s.me.alive) {
+  const latestMe = G.snaps[G.snaps.length - 1].me;
+  if (s.me.alive && latestMe.ph === 0) {
+    if (latestMe.rl > 0) { // Nachladen
+      ctx.strokeStyle = 'rgba(43,38,32,.55)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(gm.x, gm.y, 20, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - latestMe.rl / 1.1)); ctx.stroke();
+    }
     const hit = nowMs - G.hitMark < 160;
     ctx.strokeStyle = hit ? '#e8594f' : INK; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.arc(gm.x, gm.y, 11, 0, 7); ctx.stroke();

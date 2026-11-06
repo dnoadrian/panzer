@@ -193,8 +193,8 @@
     </div>
     <div class="grow"></div>
     <div class="lvl">
-      <div class="ring" id="lvlNum">1</div>
-      <div><div class="bar"><i id="xpBar" style="width:0"></i></div><small id="xpText">0 / 400 XP</small></div>
+      <canvas id="rankIcon" width="150" height="150" style="width:64px;height:64px;margin:-6px 0 -10px"></canvas>
+      <div><b id="rankName" class="hand" style="font-size:22px;line-height:1">Bronze I</b><div class="bar"><i id="xpBar" style="width:0"></i></div><small id="xpText">0 / 100 RP</small></div>
     </div>
     <button class="namebtn" id="btnName" title="Name ändern"></button>
     <button class="iconbtn" id="btnSound" title="Ton an/aus"></button>
@@ -207,7 +207,7 @@
     <canvas id="stage"></canvas>
     <div id="locker" class="hidden">
       <h2>Spind</h2>
-      <div class="sub">Neue Lackierungen schaltest du mit höherem Level frei.</div>
+      <div class="sub">Neue Lackierungen schaltest du mit höherem Rang frei.</div>
       <div class="skins" id="skins"></div>
     </div>
     <div class="partybox" id="partybox">
@@ -256,10 +256,11 @@
     <div class="acts"><button class="btn small" id="btnSpec">Nächster Spieler</button><button class="btn small yellow" id="btnLobby1">Zur Lobby</button></div>
   </div>
   <div id="resultCard" class="overlay sketch hidden">
+    <canvas id="resRank" width="200" height="200" style="width:100px;height:100px;margin:0 auto -6px"></canvas>
     <div class="t" id="resTitle"></div>
     <div class="s" id="resSub"></div>
     <div class="stats">
-      <div><b id="resKills">0</b>Kills</div><div><b id="resDmg">0</b>Schaden</div><div><b id="resXp">0</b>XP</div>
+      <div><b id="resKills">0</b>Kills</div><div><b id="resDmg">0</b>Schaden</div><div><b id="resXp">0</b>Rangpunkte</div>
     </div>
     <div class="acts"><button class="btn small" id="btnWatch">Weiter zuschauen</button><button class="btn yellow" id="btnLobby2">Zur Lobby</button></div>
   </div>

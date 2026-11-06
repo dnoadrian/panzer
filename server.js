@@ -10,33 +10,37 @@ const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // ================= Spielwerte =================
-const MAP = 2400;            // Kartengröße (Quadrat)
+const MAP = 3400;            // Kartengröße (Quadrat)
 const TR = 16;               // Panzer-Radius (Kollision)
 const HIT_R = 21;            // Treffer-Radius (etwas großzügiger als der Panzer)
 const BLOCK_TIME = 1.2, BLOCK_CD = 7; // Blocken: Dauer und Abklingzeit
 const BR = 4;                // Kugel-Radius
-const MAX_HP = 100;
+const MAX_HP = 150;
 const SPEED = 80;            // Grundtempo (langsam & taktisch)
 const SLOPE_W = 110;         // für Steigungsberechnung
-const BSPEED = 420;
-const BLIFE = 1.45;          // Reichweite ~600
-const DMG = [22, 28, 34];    // Schaden je Kanonen-Stufe
-const FIRE_CD = 0.75, RAPID_CD = 0.38;
+const BSPEED = 400;
+const BLIFE = 1.5;           // Reichweite ~600
+const DMG = 25;              // Schaden pro Treffer (6 Treffer = eliminiert)
+const KILL_HEAL = 50;        // Heilung für eine Eliminierung
+const FIRE_CD = 1.1;         // Sekunden zwischen zwei Schüssen
+const REGEN_DELAY = 5, REGEN = 6; // nach 5 s ohne Schaden repariert sich der Panzer
 const PARTY_MAX = 4;
-const VIEW_R = 1050;         // was ein Spieler vom Server gezeigt bekommt
-const COUNTDOWN = 4;
-const BUSH_HP = 60;
+const VIEW_R = 1150;         // was ein Spieler vom Server gezeigt bekommt
+const BUS_WAIT = 4;          // Sekunden bis der Kampfbus losfliegt
+const BUS_DUR = 24;          // Flugdauer über die Karte
+const DROP_TIME = 4;         // Fallschirm-Dauer
+const DROP_SPEED = 190;      // Steuern am Fallschirm
+const BUSH_HP = 1;           // ein Schuss und der Busch ist weg
 const HILL_BLOCK = 0.45;     // so viel höher darf der Hang sein, bevor er eine Kugel schluckt
 const REVEAL = 1.2;          // nach dem Schießen kurz sichtbar (auch im Busch)
-const FAST = process.env.PANZER_FAST === '1' ? 0.12 : 1; // nur zum Testen: Zone viel schneller
+const FAST = process.env.PANZER_FAST === "1" ? 0.12 : 1; // nur zum Testen: Sturm/Bus viel schneller
 const ZONE_PHASES = [
-  { wait: 45, shrink: 30, r: 1100, dps: 2 },
-  { wait: 35, shrink: 25, r: 650, dps: 4 },
-  { wait: 30, shrink: 20, r: 350, dps: 7 },
-  { wait: 25, shrink: 18, r: 150, dps: 11 },
-  { wait: 20, shrink: 20, r: 0, dps: 16 },
+  { wait: 40, shrink: 35, r: 1600, dps: 2 },
+  { wait: 35, shrink: 28, r: 950, dps: 4 },
+  { wait: 30, shrink: 22, r: 520, dps: 7 },
+  { wait: 25, shrink: 18, r: 230, dps: 11 },
+  { wait: 20, shrink: 18, r: 0, dps: 16 },
 ].map(p => ({ ...p, wait: p.wait * FAST, shrink: p.shrink * FAST }));
-const PICKUP_TYPES = [['R', 30], ['F', 20], ['T', 15], ['K', 20], ['D', 15]];
 const BOT_SKINS = ['rot', 'blau', 'gruen', 'orange', 'lila', 'tuerkis', 'grau', 'pink'];
 const BOT_NAMES = ['Otto', 'Kalle', 'Gerd', 'Franz', 'Heinz', 'Rudi', 'Bruno', 'Lotte', 'Hilde', 'Emil', 'Fritz', 'Greta',
   'Paul', 'Ida', 'Kurt', 'Erna', 'Hugo', 'Frieda', 'Willi', 'Elli', 'Karl', 'Mia', 'Jonas', 'Lena'];
@@ -82,12 +86,6 @@ function cleanName(n) {
 }
 const cleanSkin = (s) => (/^[a-z0-9-]{1,20}$/.test(String(s)) ? String(s) : 'rot');
 const validPid = (p) => /^[a-z0-9]{8,40}$/.test(String(p));
-function pickWeighted(list, r) {
-  const total = list.reduce((s, [, w]) => s + w, 0);
-  let x = r * total;
-  for (const [k, w] of list) { if ((x -= w) < 0) return k; }
-  return list[0][0];
-}
 
 // ================= Karte =================
 // Höhe 0 (flach) bis 1 (Bergplateau). Hänge dazwischen sind befahrbar.
@@ -120,25 +118,25 @@ function makeMap(seed) {
   const R = (a, b) => a + (b - a) * rnd();
   const map = { size: MAP, hills: [], rocks: [], bushes: [], teleports: [] };
   const far = (list, x, y, r, gap) => list.every(o => Math.hypot(o.x - x, o.y - y) > o.r + r + gap);
-  for (let i = 0; i < 800 && map.hills.length < 7; i++) {
-    const r = R(170, 260), x = R(r + 120, MAP - r - 120), y = R(r + 120, MAP - r - 120);
-    if (far(map.hills, x, y, r, 150)) map.hills.push({ x, y, r, p: r * 0.42 });
+  for (let i = 0; i < 800 && map.hills.length < 8; i++) {
+    const r = R(180, 280), x = R(r + 120, MAP - r - 120), y = R(r + 120, MAP - r - 120);
+    if (far(map.hills, x, y, r, 300)) map.hills.push({ x, y, r, p: r * 0.42 });
   }
   for (let i = 0; i < 4000 && map.rocks.length < 34; i++) {
     const r = R(18, 42), x = R(60, MAP - 60), y = R(60, MAP - 60);
-    if (far(map.hills, x, y, r, 30) && far(map.rocks, x, y, r, 80)) map.rocks.push({ x, y, r });
+    if (far(map.hills, x, y, r, 30) && far(map.rocks, x, y, r, 220)) map.rocks.push({ x, y, r });
   }
   const tpColor = '#9a6cff';
   for (let i = 0; i < 3000 && map.teleports.length < 2; i++) {
     const x = R(150, MAP - 150), y = R(150, MAP - 150);
     if (!far(map.hills, x, y, 20, 40) || !far(map.rocks, x, y, 20, 50)) continue;
-    if (map.teleports.length === 1 && Math.hypot(map.teleports[0].x - x, map.teleports[0].y - y) < 1300) continue;
+    if (map.teleports.length === 1 && Math.hypot(map.teleports[0].x - x, map.teleports[0].y - y) < 1900) continue;
     map.teleports.push({ x, y, r: 20, color: tpColor, pair: map.teleports.length ? 0 : 1 });
   }
   if (map.teleports.length < 2) map.teleports = [];
-  for (let i = 0; i < 5000 && map.bushes.length < 44; i++) {
+  for (let i = 0; i < 9000 && map.bushes.length < 55; i++) {
     const r = R(32, 48), x = R(80, MAP - 80), y = R(80, MAP - 80);
-    if (far(map.hills, x, y, r, 10) && far(map.rocks, x, y, r, 25) && far(map.bushes, x, y, r, 35) && far(map.teleports, x, y, r, 40)) {
+    if (far(map.hills, x, y, r, 10) && far(map.rocks, x, y, r, 25) && far(map.bushes, x, y, r, 110) && far(map.teleports, x, y, r, 40)) {
       map.bushes.push({ x, y, r, hp: BUSH_HP });
     }
   }
@@ -245,7 +243,7 @@ function login(c, msg) {
   c.pid = msg.pid;
   c.name = uniqueName(cleanName(msg.name), c);
   c.skin = cleanSkin(msg.skin);
-  c.level = clamp(msg.level | 0, 1, 999);
+  c.level = clamp(msg.level | 0, 0, 99);
   c.friends = new Map();
   c.requests = new Map();
   if (Array.isArray(msg.friends)) {
@@ -271,7 +269,7 @@ function handle(c, msg) {
   const p = c.party;
   switch (msg.t) {
     case 'profile':
-      c.skin = cleanSkin(msg.skin); c.level = clamp(msg.level | 0, 1, 999); socialDirty = true;
+      c.skin = cleanSkin(msg.skin); c.level = clamp(msg.level | 0, 0, 99); socialDirty = true;
       break;
     case 'rename':
       c.name = uniqueName(cleanName(msg.name), c);
@@ -399,32 +397,56 @@ function matchmake(now) {
 
 // ================= Match =================
 function newAI() {
-  return { target: null, seenT: 0, senseT: 0, lastSeen: null, side: 1, sideT: 0, noise: 0, noiseT: 0, wx: 0, wy: 0, wT: 0, hide: -1, hideUntil: 0 };
+  return { target: null, seenT: 0, senseT: 0, lastSeen: null, side: 1, sideT: 0, noise: 0, noiseT: 0, wx: 0, wy: 0, wT: 0, hide: -1, provoked: false };
 }
 function makeTank(id, name, team, skin, bot) {
   return {
     id, name, team, skin, bot, x: 0, y: 0, a: 0, ta: 0, h: 0, vx: 0, vy: 0,
-    hp: MAX_HP, alive: true, kills: 0, dmg: 0, cannon: 0,
-    rapidUntil: 0, speedUntil: 0, dblUntil: 0, revealUntil: 0, nextFire: 0, tpLock: -1, blockUntil: 0, blockReady: 0,
+    hp: MAX_HP, alive: true, kills: 0, dmg: 0,
+    ph: 'bus', dropT0: 0, landedAt: 0, jumpAt: 0, goal: null, lastHurt: 0,
+    revealUntil: 0, nextFire: 0, tpLock: -1, blockUntil: 0, blockReady: 0,
     input: { dx: 0, dy: 0, aim: 0, fire: false, block: false }, ai: bot ? newAI() : null,
     place: 0, resultSent: false, killerId: null,
   };
+}
+
+// Flugroute des Kampfbusses: quer über die Karte, nicht genau durch die Mitte
+function makeBusRoute() {
+  const a = Math.random() * Math.PI * 2;
+  const off = (Math.random() - 0.5) * MAP * 0.4;
+  const cx = MAP / 2 + Math.cos(a + Math.PI / 2) * off, cy = MAP / 2 + Math.sin(a + Math.PI / 2) * off;
+  // Gerade durch (cx,cy) auf das Innere der Karte zuschneiden, damit niemand am Rand landen muss
+  const dx = Math.cos(a), dy = Math.sin(a), lo = 260, hi = MAP - 260;
+  let t0 = -1e9, t1 = 1e9;
+  for (const [p, d] of [[cx, dx], [cy, dy]]) {
+    if (Math.abs(d) < 1e-6) continue;
+    let ta = (lo - p) / d, tb = (hi - p) / d;
+    if (ta > tb) [ta, tb] = [tb, ta];
+    t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+  }
+  return { x0: cx + dx * t0, y0: cy + dy * t0, x1: cx + dx * t1, y1: cy + dy * t1, a };
+}
+function busPos(m, now) {
+  const k = clamp((now - m.busStart) / m.busDur, 0, 1), r = m.bus;
+  return { x: lerp(r.x0, r.x1, k), y: lerp(r.y0, r.y1, k), k };
 }
 
 function createMatch(chosen, now) {
   const seed = Math.floor(Math.random() * 1e9);
   const map = makeMap(seed);
   const teamSize = Math.max(...chosen.map(p => p.members.length));
-  const total = teamSize >= 4 ? 16 : 12;
+  const total = teamSize >= 4 ? 20 : 16;
+  const busDur = BUS_DUR * (FAST < 1 ? 0.4 : 1);
   const m = {
-    id: uid('m'), map, tanks: [], byId: new Map(), bullets: [], pickups: [], events: [],
-    humans: new Set(), humanList: [], startAt: now + COUNTDOWN, over: false, endAt: 0, teamCount: 0, lastTick: now,
+    id: uid('m'), map, tanks: [], byId: new Map(), bullets: [], events: [],
+    humans: new Set(), humanList: [], over: false, endAt: 0, teamCount: 0, lastTick: now,
+    bus: makeBusRoute(), busStart: now + BUS_WAIT, busDur,
   };
+  m.busEnd = m.busStart + busDur;
   const names = BOT_NAMES.slice().sort(() => Math.random() - 0.5);
   let botN = 0;
   const addBot = (team) => {
-    const t = makeTank('bot' + uid(''), names[botN++ % names.length], team, BOT_SKINS[Math.floor(Math.random() * BOT_SKINS.length)], true);
-    m.tanks.push(t);
+    m.tanks.push(makeTank('bot' + uid(''), names[botN++ % names.length], team, BOT_SKINS[Math.floor(Math.random() * BOT_SKINS.length)], true));
   };
   let team = 0;
   for (const p of chosen) {
@@ -445,67 +467,29 @@ function createMatch(chosen, now) {
     team++;
   }
   m.teamCount = team;
-  for (const t of m.tanks) m.byId.set(t.id, t);
-  placePickups(m);
-  spawnTeams(m);
-  m.zone = { x: MAP / 2, y: MAP / 2, r: 1700, tx: 0, ty: 0, tr: 0, phase: 0, stage: 'wait', until: m.startAt + ZONE_PHASES[0].wait, fx: 0, fy: 0, fr: 0, s0: 0 };
+  for (const t of m.tanks) {
+    m.byId.set(t.id, t);
+    t.x = m.bus.x0; t.y = m.bus.y0; t.a = t.ta = m.bus.a;
+    if (t.bot) t.jumpAt = m.busStart + busDur * (0.08 + Math.random() * 0.84);
+  }
+  // Sturm: bedeckt am Anfang die ganze Karte, startet nach dem Bus
+  m.zone = { x: MAP / 2, y: MAP / 2, r: MAP * 0.72, tx: 0, ty: 0, tr: 0, phase: 0, stage: 'wait', until: m.busEnd + ZONE_PHASES[0].wait, fx: 0, fy: 0, fr: 0, s0: 0 };
   setZoneTarget(m.zone, 0);
   matches.set(m.id, m);
   const mapPayload = { size: MAP, hills: map.hills, rocks: map.rocks, bushes: map.bushes.map(b => ({ x: b.x, y: b.y, r: b.r, hp: b.hp })), teleports: map.teleports };
   const roster = m.tanks.map(t => ({ id: t.id, name: t.name, team: t.team, skin: t.skin, bot: t.bot }));
   for (const pid of m.humans) {
     const c = byPid.get(pid), me = m.byId.get(pid);
-    send(c, { t: 'matchStart', map: mapPayload, roster, myTeam: me.team, teams: m.teamCount, total: m.tanks.length, cd: COUNTDOWN, maxHp: MAX_HP, bushHp: BUSH_HP });
+    send(c, { t: 'matchStart', map: mapPayload, roster, myTeam: me.team, teams: m.teamCount, total: m.tanks.length, maxHp: MAX_HP, bus: m.bus, busDur, blockCd: BLOCK_CD + BLOCK_TIME });
   }
   socialDirty = true;
 }
 
-function placePickups(m) {
-  const map = m.map;
-  for (const hl of map.hills) { // Belohnung oben auf jedem Berg
-    for (let k = 0; k < 2; k++) {
-      const a = Math.random() * Math.PI * 2, d = Math.random() * hl.p * 0.6;
-      m.pickups.push({ id: uid('u'), type: k === 0 ? 'K' : pickWeighted(PICKUP_TYPES, Math.random()), x: hl.x + Math.cos(a) * d, y: hl.y + Math.sin(a) * d });
-    }
-  }
-  for (let i = 0; i < 48; i++) {
-    const p = freeSpot(map, 14, false);
-    if (p) m.pickups.push({ id: uid('u'), type: pickWeighted(PICKUP_TYPES, Math.random()), x: p.x, y: p.y });
-  }
-}
-
-function spawnTeams(m) {
-  const map = m.map;
-  const cands = [];
-  for (let i = 0; i < 400 && cands.length < 120; i++) {
-    const p = freeSpot(map, 60, true, 30);
-    if (p && p.x > 150 && p.y > 150 && p.x < MAP - 150 && p.y < MAP - 150) cands.push(p);
-  }
-  const chosen = [];
-  for (let team = 0; team < m.teamCount; team++) {
-    let best = cands[0] || { x: MAP / 2, y: MAP / 2 }, bestD = -1;
-    for (const c of cands) {
-      const d = chosen.length ? Math.min(...chosen.map(o => Math.hypot(o.x - c.x, o.y - c.y))) : Math.random() * 100;
-      if (d > bestD) { bestD = d; best = c; }
-    }
-    chosen.push(best);
-    const members = m.tanks.filter(t => t.team === team);
-    members.forEach((t, i) => {
-      const a = i * Math.PI / 2 + 0.6;
-      let x = best.x + (i ? Math.cos(a) * 46 : 0), y = best.y + (i ? Math.sin(a) * 46 : 0);
-      if (rockAt(map, x, y, TR + 4)) { x = best.x; y = best.y; }
-      t.x = x; t.y = y;
-      t.a = t.ta = Math.atan2(MAP / 2 - y, MAP / 2 - x);
-      t.input.aim = t.ta;
-    });
-  }
-}
-
 function setZoneTarget(z, phase) {
   const nr = ZONE_PHASES[phase].r;
-  const maxOff = Math.max(0, z.r - nr) * 0.75;
+  const maxOff = Math.max(0, z.r - nr) * 0.7;
   const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * maxOff;
-  const margin = Math.min(MAP / 2, nr + 150);
+  const margin = Math.min(MAP / 2, nr + 200);
   z.tx = clamp(z.x + Math.cos(a) * d, margin, MAP - margin);
   z.ty = clamp(z.y + Math.sin(a) * d, margin, MAP - margin);
   z.tr = nr;
@@ -516,7 +500,7 @@ function updateZone(m, now) {
   const ph = ZONE_PHASES[z.phase];
   if (z.stage === 'wait' && now >= z.until) {
     z.stage = 'shrink'; z.fx = z.x; z.fy = z.y; z.fr = z.r; z.s0 = now; z.until = now + ph.shrink;
-    m.events.push({ k: 'zone', g: 1, s: 'shrink' });
+    m.events.push({ k: 'zone', g: 1 });
   }
   if (z.stage === 'shrink') {
     const k = clamp((now - z.s0) / ph.shrink, 0, 1);
@@ -538,10 +522,43 @@ function collide(map, t) {
   }
 }
 
+// ---------- Bus & Fallschirm ----------
+function jump(m, t, now) {
+  const p = busPos(m, now);
+  t.ph = 'drop'; t.dropT0 = now; t.x = clamp(p.x, 40, MAP - 40); t.y = clamp(p.y, 40, MAP - 40);
+  if (t.bot) {
+    const a = Math.random() * Math.PI * 2, d = Math.random() * 520;
+    t.goal = { x: clamp(t.x + Math.cos(a) * d, 120, MAP - 120), y: clamp(t.y + Math.sin(a) * d, 120, MAP - 120) };
+  }
+  m.events.push({ k: 'jump', x: t.x, y: t.y, i: t.id });
+}
+function updateAir(m, t, now, dt) {
+  if (t.ph === 'bus') {
+    if (now < m.busStart) return;
+    const p = busPos(m, now);
+    t.x = p.x; t.y = p.y; t.a = t.ta = m.bus.a;
+    const wants = t.bot ? now >= t.jumpAt : t.input.fire;
+    if (wants || now >= m.busEnd) jump(m, t, now);
+    return;
+  }
+  // Fallschirm: frei steuern, dann landen
+  let dx = t.input.dx, dy = t.input.dy;
+  if (t.bot && t.goal) { dx = t.goal.x - t.x; dy = t.goal.y - t.y; if (Math.hypot(dx, dy) < 12) dx = dy = 0; }
+  const L = Math.hypot(dx, dy);
+  if (L > 0.05) { t.x += dx / L * DROP_SPEED * dt; t.y += dy / L * DROP_SPEED * dt; t.a = turnTo(t.a, Math.atan2(dy, dx), dt * 6); }
+  t.x = clamp(t.x, TR, MAP - TR); t.y = clamp(t.y, TR, MAP - TR);
+  t.ta = t.bot ? t.a : turnTo(t.ta, t.input.aim, dt * 40);
+  if (now - t.dropT0 >= DROP_TIME) {
+    t.ph = 'ground'; t.landedAt = now; t.lastHurt = now;
+    collide(m.map, t);
+    t.h = heightAt(m.map, t.x, t.y);
+    m.events.push({ k: 'land', x: t.x, y: t.y, i: t.id });
+  }
+}
+
 function moveTank(m, t, now, dt) {
   const map = m.map, inp = t.input;
   const px = t.x, py = t.y;
-  // Blocken starten (nur wenn bereit)
   if (inp.block && now >= t.blockReady) {
     t.blockUntil = now + BLOCK_TIME; t.blockReady = now + BLOCK_TIME + BLOCK_CD;
     m.events.push({ k: 'blockOn', x: t.x, y: t.y, i: t.id });
@@ -553,14 +570,13 @@ function moveTank(m, t, now, dt) {
     const h0 = heightAt(map, t.x, t.y), h1 = heightAt(map, t.x + dx * 6, t.y + dy * 6);
     const s = clamp((h1 - h0) / 6 * SLOPE_W, -1, 1);
     const f = s > 0 ? 1 - 0.55 * s : 1 - 0.3 * s; // bergauf langsamer, bergab schneller
-    const sp = SPEED * (now < t.speedUntil ? 1.45 : 1) * (blocking ? 0.6 : 1) * f;
+    const sp = SPEED * (blocking ? 0.6 : 1) * f;
     t.a = turnTo(t.a, Math.atan2(dy, dx), dt * 10);
     t.x += dx * sp * dt; t.y += dy * sp * dt;
     collide(map, t);
   }
   t.ta = turnTo(t.ta, inp.aim, dt * (t.bot ? 6 : 40));
 
-  // Teleporter
   const tps = map.teleports;
   for (let i = 0; i < tps.length; i++) {
     const tp = tps[i], d = Math.hypot(t.x - tp.x, t.y - tp.y);
@@ -576,29 +592,15 @@ function moveTank(m, t, now, dt) {
   t.vx = (t.x - px) / dt; t.vy = (t.y - py) / dt;
   t.h = heightAt(map, t.x, t.y);
 
-  // Kisten einsammeln
-  for (const p of m.pickups) {
-    if (p.taken || Math.hypot(t.x - p.x, t.y - p.y) > TR + 14) continue;
-    if (p.type === 'R' && t.hp >= MAX_HP) continue;
-    if (p.type === 'K' && t.cannon >= 2) continue;
-    if (p.type === 'R') t.hp = Math.min(MAX_HP, t.hp + 35);
-    if (p.type === 'F') t.rapidUntil = now + 9;
-    if (p.type === 'T') t.speedUntil = now + 9;
-    if (p.type === 'K') t.cannon++;
-    if (p.type === 'D') t.dblUntil = now + 10;
-    p.taken = true;
-    m.events.push({ k: 'pick', x: p.x, y: p.y, type: p.type, by: t.id });
-  }
+  // langsame Selbstreparatur, wenn länger kein Schaden (nicht im Sturm)
+  const z = m.zone;
+  if (t.hp < MAX_HP && now - t.lastHurt > REGEN_DELAY && Math.hypot(t.x - z.x, t.y - z.y) < z.r) t.hp = Math.min(MAX_HP, t.hp + REGEN * dt);
 
-  // Schießen
   if (inp.fire && now >= t.nextFire && !blocking) {
-    t.nextFire = now + (now < t.rapidUntil ? RAPID_CD : FIRE_CD);
+    t.nextFire = now + FIRE_CD;
     t.revealUntil = now + REVEAL;
-    const c = Math.cos(t.ta), s = Math.sin(t.ta), dmg = DMG[t.cannon], ob = bushAt(map, t.x, t.y);
-    const offs = now < t.dblUntil ? [-7, 7] : [0];
-    for (const o of offs) {
-      m.bullets.push({ id: (bulletId = (bulletId + 1) % 1e6), x: t.x + c * (TR + 10) - s * o, y: t.y + s * (TR + 10) + c * o, vx: c * BSPEED, vy: s * BSPEED, owner: t.id, team: t.team, h: t.h, dmg, life: BLIFE, bush: ob });
-    }
+    const c = Math.cos(t.ta), s = Math.sin(t.ta), ob = bushAt(map, t.x, t.y);
+    m.bullets.push({ id: (bulletId = (bulletId + 1) % 1e6), x: t.x + c * (TR + 10), y: t.y + s * (TR + 10), vx: c * BSPEED, vy: s * BSPEED, a: t.ta, owner: t.id, team: t.team, h: t.h, dmg: DMG, life: BLIFE, bush: ob });
     m.events.push({ k: 'shot', x: t.x + c * (TR + 12), y: t.y + s * (TR + 12), a: t.ta, i: t.id });
   }
 }
@@ -619,15 +621,15 @@ function updateBullets(m, now, dt) {
         const bu = map.bushes[i];
         if (i === b.bush || bu.hp <= 0) continue;
         if (Math.hypot(b.x - bu.x, b.y - bu.y) < bu.r) {
-          bu.hp = Math.max(0, bu.hp - b.dmg);
-          m.events.push({ k: 'bush', g: 1, i, hp: bu.hp, x: b.x, y: b.y });
+          bu.hp = 0;
+          m.events.push({ k: 'bush', g: 1, i, hp: 0, x: bu.x, y: bu.y });
           hit = true; break;
         }
       }
     }
     if (!hit) {
       for (const t of m.tanks) {
-        if (!t.alive || t.team === b.team) continue;
+        if (!t.alive || t.ph !== 'ground' || t.team === b.team) continue;
         if (Math.hypot(t.x - b.x, t.y - b.y) < HIT_R + BR) {
           if (now < t.blockUntil) m.events.push({ k: 'block', x: b.x, y: b.y, v: t.id, by: b.owner });
           else damage(m, t, b, now);
@@ -643,7 +645,7 @@ function updateBullets(m, now, dt) {
 function damage(m, t, b, now) {
   const att = m.byId.get(b.owner);
   const d = Math.min(t.hp, b.dmg);
-  t.hp -= b.dmg;
+  t.hp -= b.dmg; t.lastHurt = now;
   if (att) att.dmg += d;
   m.events.push({ k: 'hit', x: t.x, y: t.y, d: b.dmg, v: t.id, by: b.owner });
   if (t.bot && att) { t.ai.lastSeen = { x: att.x, y: att.y, t: now }; t.ai.senseT = 0; t.ai.provoked = true; }
@@ -653,24 +655,23 @@ function damage(m, t, b, now) {
 function eliminate(m, t, killer, cause, now) {
   if (!t.alive) return;
   t.alive = false; t.hp = 0; t.killerId = killer ? killer.id : null;
-  m.events.push({ k: 'boom', x: t.x, y: t.y });
-  // Beute fallen lassen
-  m.pickups.push({ id: uid('u'), type: 'R', x: t.x, y: t.y });
-  if (t.cannon > 0 && !rockAt(m.map, t.x + 22, t.y, 14)) m.pickups.push({ id: uid('u'), type: 'K', x: t.x + 22, y: t.y });
+  if (t.ph === 'ground') m.events.push({ k: 'boom', x: t.x, y: t.y });
   let text;
-  if (killer && killer !== t) { killer.kills++; text = `${killer.name} hat ${t.name} erledigt`; }
-  else if (cause === 'zone') text = `${t.name} wurde von der Zone erwischt`;
+  if (killer && killer !== t) {
+    killer.kills++; text = `${killer.name} hat ${t.name} eliminiert`;
+    if (killer.alive) { const before = killer.hp; killer.hp = Math.min(MAX_HP, killer.hp + KILL_HEAL); m.events.push({ k: 'heal', x: killer.x, y: killer.y, i: killer.id, d: Math.round(killer.hp - before) }); }
+  }
+  else if (cause === 'zone') text = `${t.name} wurde vom Sturm erwischt`;
   else text = `${t.name} hat das Spiel verlassen`;
   m.events.push({ k: 'feed', g: 1, text, by: killer ? killer.id : null, v: t.id });
   if (killer) m.events.push({ k: 'elim', g: 1, by: killer.id, v: t.id, vn: t.name });
-
+  const teamsAliveNow = new Set(m.tanks.filter(o => o.alive).map(o => o.team)).size;
   if (!t.bot) {
     const c = byPid.get(t.id);
-    if (c && c.match === m) send(c, { t: 'dead', by: killer ? killer.name : null, cause });
+    if (c && c.match === m) send(c, { t: 'dead', by: killer ? killer.name : null, cause, place: teamsAliveNow + 1 });
   }
   if (!m.tanks.some(o => o.team === t.team && o.alive)) {
-    const teamsAlive = new Set(m.tanks.filter(o => o.alive).map(o => o.team)).size;
-    for (const o of m.tanks) if (o.team === t.team) sendResult(m, o, teamsAlive + 1, false);
+    for (const o of m.tanks) if (o.team === t.team) sendResult(m, o, teamsAliveNow + 1, false);
   }
   checkEnd(m, now);
 }
@@ -711,11 +712,10 @@ function leaveMatch(c, disconnect) {
 
 // ---------- Bots ----------
 function hiddenFrom(map, t, viewer, now) {
-  if (t.team === viewer.team || now < t.revealUntil) return false;
+  if (t.team === viewer.team || now < t.revealUntil || t.ph !== 'ground') return false;
   if (bushAt(map, t.x, t.y) < 0) return false;
   return dist(t, viewer) > 75;
 }
-// Würde eine Kugel von a nach b durchkommen? (Felsen, Berghänge, fremde Büsche)
 function shotClear(map, a, b, h) {
   const d = Math.hypot(b.x - a.x, b.y - a.y), steps = Math.ceil(d / 18);
   const own = bushAt(map, a.x, a.y), targetBush = bushAt(map, b.x, b.y);
@@ -735,14 +735,14 @@ function blockedAt(map, x, y) {
 function botThink(m, t, now, dt) {
   const ai = t.ai, map = m.map, z = m.zone;
   ai.senseT -= dt; ai.sideT -= dt; ai.noiseT -= dt; ai.wT -= dt;
-  if (ai.noiseT <= 0) { ai.noiseT = 0.6; ai.noise = (Math.random() - 0.5) * 0.22; }
+  if (ai.noiseT <= 0) { ai.noiseT = 0.6; ai.noise = (Math.random() - 0.5) * 0.24; }
   if (ai.sideT <= 0) { ai.sideT = 1 + Math.random() * 1.6; ai.side = Math.random() < 0.5 ? -1 : 1; }
   if (ai.senseT <= 0) {
     ai.senseT = 0.25;
     let best = null, bs = Infinity;
-    const calm = now < m.startAt + 12 && !ai.provoked; // Sammelphase am Anfang
+    const calm = now < t.landedAt + 8 && !ai.provoked; // kurz nach der Landung erst umschauen
     for (const o of m.tanks) {
-      if (calm || !o.alive || o.team === t.team) continue;
+      if (calm || !o.alive || o.ph !== 'ground' || o.team === t.team) continue;
       const d = dist(o, t);
       if (d > 560 || hiddenFrom(map, o, t, now)) continue;
       const score = d + o.hp * 1.5;
@@ -756,7 +756,6 @@ function botThink(m, t, now, dt) {
   const tg = ai.target;
   if (tg) ai.seenT += dt;
 
-  // Zone beachten
   const useNext = z.stage === 'shrink' || (z.stage === 'wait' && z.until - now < 20);
   const zx = useNext ? z.tx : z.x, zy = useNext ? z.ty : z.y, zr = useNext ? z.tr : z.r;
   const outside = Math.hypot(t.x - z.x, t.y - z.y) > z.r - 25;
@@ -773,28 +772,19 @@ function botThink(m, t, now, dt) {
   } else if (ai.lastSeen && now - ai.lastSeen.t < 4) {
     const d = Math.hypot(ai.lastSeen.x - t.x, ai.lastSeen.y - t.y);
     if (d > 260) { gx = ai.lastSeen.x; gy = ai.lastSeen.y; } else move = false;
-  } else if (t.hp < 45 && (ai.hide >= 0 || Math.random() < 0.02)) {
+  } else if (t.hp < 50 && (ai.hide >= 0 || Math.random() < 0.03)) {
     if (ai.hide < 0 || map.bushes[ai.hide].hp <= 0) {
-      let bd = 450; ai.hide = -1;
+      let bd = 500; ai.hide = -1;
       map.bushes.forEach((b, i) => { const d = Math.hypot(b.x - t.x, b.y - t.y); if (b.hp > 0 && d < bd) { bd = d; ai.hide = i; } });
     }
     if (ai.hide >= 0) { const b = map.bushes[ai.hide]; gx = b.x; gy = b.y; if (Math.hypot(b.x - t.x, b.y - t.y) < 8) move = false; }
   } else {
-    let best = null, bd = 500;
-    for (const p of m.pickups) {
-      if (p.taken || (p.type === 'R' && t.hp >= MAX_HP) || (p.type === 'K' && t.cannon >= 2)) continue;
-      if (Math.hypot(p.x - z.x, p.y - z.y) > z.r - 30) continue;
-      const d = Math.hypot(p.x - t.x, p.y - t.y);
-      if (d < bd) { bd = d; best = p; }
+    if (ai.wT <= 0 || Math.hypot(ai.wx - t.x, ai.wy - t.y) < 30) {
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * Math.min(zr * 0.6, 700);
+      const cx = Math.hypot(t.x - zx, t.y - zy) < zr * 0.6 ? t.x : zx, cy = Math.hypot(t.x - zx, t.y - zy) < zr * 0.6 ? t.y : zy;
+      ai.wx = clamp(cx + Math.cos(a) * r, 80, MAP - 80); ai.wy = clamp(cy + Math.sin(a) * r, 80, MAP - 80); ai.wT = 5 + Math.random() * 4;
     }
-    if (best) { gx = best.x; gy = best.y; }
-    else {
-      if (ai.wT <= 0 || Math.hypot(ai.wx - t.x, ai.wy - t.y) < 30) {
-        const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * zr * 0.6;
-        ai.wx = clamp(zx + Math.cos(a) * r, 80, MAP - 80); ai.wy = clamp(zy + Math.sin(a) * r, 80, MAP - 80); ai.wT = 4 + Math.random() * 3;
-      }
-      gx = ai.wx; gy = ai.wy;
-    }
+    gx = ai.wx; gy = ai.wy;
   }
   let ang = Math.atan2(gy - t.y, gx - t.x);
   if (Math.hypot(gx - t.x, gy - t.y) < 10) move = false;
@@ -811,16 +801,14 @@ function botThink(m, t, now, dt) {
     const px = tg.x + tg.vx * tt * 0.8, py = tg.y + tg.vy * tt * 0.8;
     const a = Math.atan2(py - t.y, px - t.x);
     aim = a + ai.noise * Math.min(1.5, d / 400);
-    fire = ai.seenT > 0.55 && d < 540 && Math.abs(normAngle(a - t.ta)) < 0.14 && shotClear(map, t, tg, t.h);
+    fire = ai.seenT > 0.55 && d < 560 && Math.abs(normAngle(a - t.ta)) < 0.14 && shotClear(map, t, tg, t.h);
   } else if (ai.lastSeen && now - ai.lastSeen.t < 3) {
-    // Feind ist im Busch verschwunden -> Busch zerschießen
     const bi = bushAt(map, ai.lastSeen.x, ai.lastSeen.y);
     if (bi >= 0 && bi !== bushAt(map, t.x, t.y) && Math.hypot(ai.lastSeen.x - t.x, ai.lastSeen.y - t.y) < 480) {
       const a = Math.atan2(ai.lastSeen.y - t.y, ai.lastSeen.x - t.x);
       aim = a; fire = Math.abs(normAngle(a - t.ta)) < 0.15;
     }
   }
-  // Blocken, wenn eine feindliche Kugel direkt auf den Bot zufliegt
   let block = false;
   if (now >= t.blockReady && Math.random() < 0.5) {
     for (const b of m.bullets) {
@@ -835,31 +823,28 @@ function botThink(m, t, now, dt) {
 
 function stepMatch(m, now, dt) {
   updateZone(m, now);
-  if (now >= m.startAt && !m.over) {
-    for (const t of m.tanks) if (t.alive && t.bot) botThink(m, t, now, dt);
-    for (const t of m.tanks) if (t.alive) moveTank(m, t, now, dt);
-    const alive = m.tanks.filter(t => t.alive);
-    for (let i = 0; i < alive.length; i++) for (let j = i + 1; j < alive.length; j++) {
-      const a = alive[i], b = alive[j];
-      const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), min = TR * 2;
-      if (d < min) {
-        const nx = d > 0.001 ? dx / d : 1, ny = d > 0.001 ? dy / d : 0, p = (min - d) / 2;
-        a.x -= nx * p; a.y -= ny * p; b.x += nx * p; b.y += ny * p;
-        collide(m.map, a); collide(m.map, b);
-      }
+  if (m.over) { updateBullets(m, now, dt); return; }
+  for (const t of m.tanks) if (t.alive && t.ph !== 'ground') updateAir(m, t, now, dt);
+  for (const t of m.tanks) if (t.alive && t.ph === 'ground' && t.bot) botThink(m, t, now, dt);
+  for (const t of m.tanks) if (t.alive && t.ph === 'ground') moveTank(m, t, now, dt);
+  const ground = m.tanks.filter(t => t.alive && t.ph === 'ground');
+  for (let i = 0; i < ground.length; i++) for (let j = i + 1; j < ground.length; j++) {
+    const a = ground[i], b = ground[j];
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), min = TR * 2;
+    if (d < min) {
+      const nx = d > 0.001 ? dx / d : 1, ny = d > 0.001 ? dy / d : 0, p = (min - d) / 2;
+      a.x -= nx * p; a.y -= ny * p; b.x += nx * p; b.y += ny * p;
+      collide(m.map, a); collide(m.map, b);
     }
-    m.pickups = m.pickups.filter(p => !p.taken);
-    updateBullets(m, now, dt);
-    const z = m.zone, dps = zoneDps(z);
-    for (const t of m.tanks) {
-      if (!t.alive) continue;
-      if (Math.hypot(t.x - z.x, t.y - z.y) > z.r) {
-        t.hp -= dps * dt;
-        if (t.hp <= 0) eliminate(m, t, null, 'zone', now);
-      }
+  }
+  updateBullets(m, now, dt);
+  const z = m.zone, dps = zoneDps(z);
+  for (const t of ground) {
+    if (!t.alive) continue;
+    if (Math.hypot(t.x - z.x, t.y - z.y) > z.r) {
+      t.hp -= dps * dt;
+      if (t.hp <= 0) eliminate(m, t, null, 'zone', now);
     }
-  } else if (m.over) {
-    updateBullets(m, now, dt);
   }
 }
 
@@ -873,14 +858,16 @@ function pickFocus(m, c, me) {
   c.focusId = f.id;
   return f;
 }
+const PH = { ground: 0, bus: 1, drop: 2 };
 function sendStates(m, now) {
   const z = m.zone, map = m.map;
   const zone = { x: r1(z.x), y: r1(z.y), r: r1(z.r), tx: r1(z.tx), ty: r1(z.ty), tr: r1(z.tr), st: z.stage, left: r1(Math.max(0, z.until - now)), ph: z.phase };
-  const aliveN = m.tanks.filter(t => t.alive).length;
-  const teamsN = new Set(m.tanks.filter(t => t.alive).map(t => t.team)).size;
-  // besetzte Büsche (für Blätter-Partikel)
+  const alive = m.tanks.filter(t => t.alive);
+  const teamsN = new Set(alive.map(t => t.team)).size;
+  const bp = busPos(m, now);
+  const bus = now < m.busEnd ? { x: r1(bp.x), y: r1(bp.y), k: Math.round(bp.k * 1000) / 1000, wait: r1(Math.max(0, m.busStart - now)), n: alive.filter(t => t.ph === 'bus').length } : null;
   const occ = [];
-  for (const t of m.tanks) if (t.alive) { const bi = bushAt(map, t.x, t.y); if (bi >= 0 && !occ.includes(bi)) occ.push(bi); }
+  for (const t of alive) if (t.ph === 'ground') { const bi = bushAt(map, t.x, t.y); if (bi >= 0 && !occ.includes(bi)) occ.push(bi); }
   for (const pid of m.humans) {
     const c = byPid.get(pid);
     if (!c || c.match !== m) continue;
@@ -888,27 +875,26 @@ function sendStates(m, now) {
     const f = pickFocus(m, c, me);
     const near = (o, extra = 0) => Math.hypot(o.x - f.x, o.y - f.y) < VIEW_R + extra;
     const tanks = [];
-    for (const t of m.tanks) {
-      if (!t.alive) continue;
+    for (const t of alive) {
+      if (t.ph === 'bus') continue;
       if (t !== f && t.team !== me.team && (!near(t) || hiddenFrom(map, t, f, now))) continue;
       if (t.team === me.team && !near(t, 400)) continue;
-      tanks.push({ i: t.id, x: r1(t.x), y: r1(t.y), a: r1(t.a * 10) / 10, ta: r1(t.ta * 10) / 10, h: Math.round(t.h * 100) / 100, hp: Math.ceil(t.hp), sp: now < t.speedUntil ? 1 : 0, df: now < t.dblUntil ? 1 : 0, rf: now < t.rapidUntil ? 1 : 0, bk: now < t.blockUntil ? 1 : 0 });
+      tanks.push({
+        i: t.id, x: r1(t.x), y: r1(t.y), a: r1(t.a * 10) / 10, ta: r1(t.ta * 10) / 10, h: Math.round(t.h * 100) / 100, hp: Math.ceil(t.hp),
+        bk: now < t.blockUntil ? 1 : 0, ph: PH[t.ph], alt: t.ph === 'drop' ? Math.round(clamp(1 - (now - t.dropT0) / DROP_TIME, 0, 1) * 100) / 100 : 0,
+      });
     }
-    const ft = m.byId.get(f.id);
     send(c, {
-      t: 's', ts: Math.round(now * 1000), f: f.id, cd: r1(Math.max(0, m.startAt - now)),
+      t: 's', ts: Math.round(now * 1000), f: f.id,
       me: {
-        hp: Math.ceil(Math.max(0, me.hp)), alive: me.alive, kills: me.kills, dmg: Math.round(me.dmg), k: me.cannon,
-        rf: r1(Math.max(0, me.rapidUntil - now)), sp: r1(Math.max(0, me.speedUntil - now)), df: r1(Math.max(0, me.dblUntil - now)),
-        bk: now < me.blockUntil ? 1 : 0, bl: r1(Math.max(0, me.blockReady - now)), bcd: BLOCK_CD + BLOCK_TIME,
+        hp: Math.ceil(Math.max(0, me.hp)), alive: me.alive, kills: me.kills, dmg: Math.round(me.dmg), ph: PH[me.ph],
+        bk: now < me.blockUntil ? 1 : 0, bl: r1(Math.max(0, me.blockReady - now)), rl: r1(Math.max(0, me.nextFire - now)),
       },
-      fk: ft ? ft.kills : 0,
-      tanks,
-      b: m.bullets.filter(b => near(b)).map(b => [b.id, r1(b.x), r1(b.y), b.team === me.team ? 1 : 0]),
-      p: m.pickups.filter(p => near(p, 100)).map(p => [p.id, p.type, r1(p.x), r1(p.y)]),
+      bus, tanks,
+      b: m.bullets.filter(b => near(b)).map(b => [b.id, r1(b.x), r1(b.y), b.team === me.team ? 1 : 0, r1(b.a * 10) / 10]),
       occ: occ.filter(i => near(map.bushes[i])),
       ev: m.events.filter(e => e.g || (e.x !== undefined && near(e, 150))),
-      z: zone, al: aliveN, tl: teamsN,
+      z: zone, al: alive.length, tl: teamsN,
       mates: m.tanks.filter(t => t.team === me.team).map(t => [t.id, r1(t.x), r1(t.y), t.alive ? 1 : 0, Math.ceil(Math.max(0, t.hp))]),
     });
   }
@@ -922,7 +908,7 @@ setInterval(() => {
   for (const m of [...matches.values()]) {
     const dt = clamp(now - m.lastTick, 0.001, 0.1);
     m.lastTick = now;
-    stepMatch(m, now, dt);
+    try { stepMatch(m, now, dt); } catch (e) { console.error('Fehler im Match', e); }
     if (!matches.has(m.id)) continue;
     sendStates(m, now);
     if (m.over && now >= m.endAt) {
