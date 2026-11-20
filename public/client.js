@@ -95,7 +95,7 @@ function connect() {
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
 function login() {
   const legacyRp = load('rp', null);
-  send({ t: 'login', pid: local.pid, name: local.name, legacy: legacyRp != null ? { rp: legacyRp, skin: load('skin', null) } : null });
+  send({ t: 'login', pid: local.pid, name: local.name, backup: load('backup', null), legacy: legacyRp != null ? { rp: legacyRp, skin: load('skin', null) } : null });
 }
 
 function onMsg(m) {
@@ -113,6 +113,7 @@ function onMsg(m) {
       $('nameInput').value = m.name; $('nameInput').select();
       break;
     case 'profile': prof = m; renderTop(); renderLocker(); renderAbilities(); renderShop(); break;
+    case 'backup': save('backup', { data: m.data, sig: m.sig }); break;
     case 'shop': shop = { items: m.items, nextIn: m.nextIn, at: performance.now() }; renderShop(); break;
     case 'bought': sfx.buy(); toast(`${CAT.ITEM_BY_ID[m.id].name} gehört jetzt dir und ist ausgerüstet!`); break;
     case 'party': party = m; renderParty(); renderFriends(); break;
@@ -126,7 +127,7 @@ function onMsg(m) {
       showLogin('PANZER ist in einem anderen Fenster geöffnet.', 'Hier spielen');
       break;
     case 'accountDeleted':
-      for (const k of ['pid', 'name', 'rp', 'skin', 'friends', 'recent', 'tut', 'settings', 'xp']) { try { localStorage.removeItem(KEY(k)); } catch { /* egal */ } }
+      for (const k of ['pid', 'name', 'rp', 'skin', 'friends', 'recent', 'tut', 'settings', 'xp', 'backup']) { try { localStorage.removeItem(KEY(k)); } catch { /* egal */ } }
       kicked = true;
       showLogin('Dein Konto wurde gelöscht.', 'Neu anfangen');
       setTimeout(() => location.reload(), 1800);

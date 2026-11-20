@@ -1,6 +1,7 @@
 // PANZER – Server: Webseite, Konten, Freunde, Party, Matchmaking, Shop, Admin
 'use strict';
 const http = require('http');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
@@ -92,7 +93,28 @@ function newUser(pid, name, legacy) {
 function profilePayload(u) {
   return { t: 'profile', pid: u.pid, name: u.name, rp: u.rp, coins: u.coins, owned: u.owned, equip: u.equip, ability: u.ability, stats: u.stats, cheats: u.cheats };
 }
-function sendProfile(c) { if (c && c.user) send(c, profilePayload(c.user)); }
+// Sicherungskopie im Browser: vom Server unterschrieben, damit niemand sie verändern kann
+const BACKUP_SECRET = process.env.BACKUP_SECRET || 'panzer-papier-kampfbus-7f3a91c2e8d4b6';
+const sign = (data) => crypto.createHmac('sha256', BACKUP_SECRET).update(data).digest('hex');
+function sendProfile(c) {
+  if (!c || !c.user) return;
+  const u = c.user;
+  send(c, profilePayload(u));
+  const data = JSON.stringify({ pid: u.pid, name: u.name, created: u.created, rp: u.rp, coins: u.coins, owned: u.owned, equip: u.equip, ability: u.ability, friends: u.friends, stats: u.stats });
+  send(c, { t: 'backup', data, sig: sign(data) });
+}
+function restoreBackup(pid, b) {
+  try {
+    if (!b || typeof b.data !== 'string' || typeof b.sig !== 'string' || b.data.length > 20000) return null;
+    const a = Buffer.from(sign(b.data)), g = Buffer.from(b.sig);
+    if (a.length !== g.length || !crypto.timingSafeEqual(a, g)) return null;
+    const d = JSON.parse(b.data);
+    if (d.pid !== pid) return null;
+    const u = newUser(pid, cleanName(d.name));
+    Object.assign(u, { created: d.created || Date.now(), rp: d.rp | 0, coins: d.coins | 0, owned: Array.isArray(d.owned) ? d.owned : [], equip: { ...u.equip, ...d.equip }, ability: d.ability || 'turbo', friends: Array.isArray(d.friends) ? d.friends : [], stats: { ...u.stats, ...d.stats } });
+    return u;
+  } catch { return null; }
+}
 function activeMessages() {
   const meta = DB.meta(), now = Date.now();
   meta.messages = (meta.messages || []).filter(m => m.until > now);
@@ -176,6 +198,10 @@ function makeFriends(a, b) {
 function login(c, msg) {
   if (c.pid || !validPid(msg.pid)) return;
   let u = DB.get(msg.pid);
+  if (!u) {
+    const r = restoreBackup(msg.pid, msg.backup); // Konto nach Server-Neustart wiederherstellen
+    if (r && r.name.length >= 2 && !DB.nameTaken(r.name)) u = DB.create(r);
+  }
   if (!u) {
     const name = cleanName(msg.name);
     if (name.length < 2) return send(c, { t: 'nameTaken', name, rename: false, reason: 'Der Name ist zu kurz.' });

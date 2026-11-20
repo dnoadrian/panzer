@@ -116,7 +116,7 @@ $('btnSetReset').onclick = () => {
 $('btnDelete').onclick = () => {
   if (!confirm('Konto wirklich löschen? Name, Rang, Zahnräder, Freunde und Items sind danach weg.')) return;
   send({ t: 'deleteAccount' });
-  for (const k of ['pid', 'name', 'rp', 'skin', 'friends', 'recent', 'tut', 'settings', 'xp']) { try { localStorage.removeItem(KEY(k)); } catch { /* egal */ } }
+  for (const k of ['pid', 'name', 'rp', 'skin', 'friends', 'recent', 'tut', 'settings', 'xp', 'backup']) { try { localStorage.removeItem(KEY(k)); } catch { /* egal */ } }
   setTimeout(() => location.reload(), 300);
 };
 $('settings').addEventListener('click', (e) => { if (e.target.id === 'settings') closeSettings(); });
