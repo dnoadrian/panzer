@@ -59,6 +59,14 @@ function send(c, o) { if (c && c.ws.readyState === 1) c.ws.send(JSON.stringify(o
 const sendPid = (pid, o) => send(online.get(pid), o);
 function toast(c, msg) { send(c, { t: 'toast', msg }); }
 const rankIdx = (u) => CAT.rankInfo(u.rp).idx;
+// die drei besten Unreal-Spieler (für Wallhack)
+let top3Cache = { at: 0, list: [] };
+function top3() {
+  if (Date.now() - top3Cache.at < 5000) return top3Cache.list;
+  const list = DB.all().filter(u => rankIdx(u) >= CAT.RANKS.length - 1).sort((a, b) => b.rp - a.rp).slice(0, 3).map(u => u.pid);
+  top3Cache = { at: Date.now(), list };
+  return list;
+}
 
 // ================= Spiel-Engine =================
 const engine = createEngine({
@@ -91,7 +99,8 @@ function newUser(pid, name, legacy) {
   return u;
 }
 function profilePayload(u) {
-  return { t: 'profile', pid: u.pid, name: u.name, rp: u.rp, coins: u.coins, owned: u.owned, equip: u.equip, ability: u.ability, stats: u.stats, cheats: u.cheats };
+  const t3 = top3();
+  return { t: 'profile', top3: t3.map(pid => (DB.get(pid) || {}).name).filter(Boolean), isTop3: t3.includes(u.pid), pid: u.pid, name: u.name, rp: u.rp, coins: u.coins, owned: u.owned, equip: u.equip, ability: u.ability, stats: u.stats, cheats: u.cheats };
 }
 // Sicherungskopie im Browser: vom Server unterschrieben, damit niemand sie verändern kann
 const BACKUP_SECRET = process.env.BACKUP_SECRET || 'panzer-papier-kampfbus-7f3a91c2e8d4b6';
@@ -257,7 +266,7 @@ function handle(c, msg) {
       break;
     }
     case 'setAbility':
-      if (!CAT.canUseAbility(u, msg.id, u.cheats.allab)) return toast(c, 'Diese Fähigkeit ist noch gesperrt.');
+      if (!CAT.canUseAbility(u, msg.id, u.cheats.allab, top3())) return toast(c, msg.id === 'wallhack' ? 'Wallhack gibt es nur für die Top 3 Unreal-Spieler.' : 'Diese Fähigkeit ist noch gesperrt.');
       u.ability = msg.id; DB.save(u); sendProfile(c);
       break;
     case 'buy': {
@@ -357,7 +366,13 @@ function handle(c, msg) {
 }
 
 // ================= Matchmaking (echte Spieler zuerst, dann Bots) =================
-const player = (pid) => { const u = DB.get(pid); return { id: pid, name: u.name, equip: u.equip, ability: u.ability, cheats: u.cheats || {} }; };
+const player = (pid) => {
+  const u = DB.get(pid);
+  // Wer nicht (mehr) Top 3 ist, bekommt statt Wallhack die Unreal-Fähigkeit "Übermacht"
+  let ability = u.ability;
+  if (!CAT.canUseAbility(u, ability, u.cheats && u.cheats.allab, top3())) { ability = CAT.canUseAbility(u, 'overdrive') ? 'overdrive' : 'turbo'; u.ability = ability; DB.save(u); }
+  return { id: pid, name: u.name, equip: u.equip, ability, cheats: u.cheats || {} };
+};
 function matchmake(now) {
   queue = queue.filter(q => parties.has(q.party.id) && q.party.members.every(pid => online.has(pid)));
   for (const mode of Object.keys(MODES)) {

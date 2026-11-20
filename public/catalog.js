@@ -48,26 +48,27 @@
 
   // ---------------- Fähigkeiten (eine pro Rang) ----------------
   const ABILITIES = [
-    { id: 'turbo', name: 'Turbo', type: 'aktiv', cd: 12, desc: '2,5 s lang 60 % schneller.' },
-    { id: 'repair', name: 'Reparatur', type: 'aktiv', cd: 22, desc: 'Heilt 45 Leben über 2 Sekunden.' },
+    { id: 'turbo', name: 'Turbo', type: 'aktiv', cd: 11, desc: '3 s lang 60 % schneller.' },
+    { id: 'repair', name: 'Reparatur', type: 'aktiv', cd: 20, desc: 'Heilt 55 Leben über 2 Sekunden.' },
     { id: 'smoke', name: 'Nebelwand', type: 'aktiv', cd: 20, desc: 'Nebelwolke, in der dich niemand sieht (6 s).' },
-    { id: 'mine', name: 'Mine', type: 'aktiv', cd: 12, desc: 'Legt eine versteckte Mine (45 Schaden).' },
-    { id: 'sniper', name: 'Scharfschütze', type: 'passiv', cd: 0, desc: 'Kugeln fliegen 70 % weiter und schneller, du schießt etwas langsamer.' },
-    { id: 'salvo', name: 'Salve', type: 'aktiv', cd: 10, desc: 'Feuert sofort 3 Schüsse hintereinander.' },
+    { id: 'mine', name: 'Mine', type: 'aktiv', cd: 12, desc: 'Legt eine versteckte Mine (50 Schaden, bis zu 3).' },
+    { id: 'sniper', name: 'Scharfschütze', type: 'passiv', cd: 0, desc: 'Kugeln fliegen 70 % weiter, schneller und machen 20 % mehr Schaden. Du schießt etwas langsamer.' },
+    { id: 'salvo', name: 'Salve', type: 'aktiv', cd: 11, desc: 'Feuert sofort 3 Schüsse hintereinander.' },
     { id: 'dome', name: 'Schutzkuppel', type: 'aktiv', cd: 24, desc: '3 s unverwundbar, du kannst weiter schießen.' },
-    { id: 'radar', name: 'Radar', type: 'aktiv', cd: 20, desc: 'Zeigt 5 s alle Gegner in der Nähe auf der Karte.' },
+    { id: 'radar', name: 'Radar', type: 'aktiv', cd: 18, desc: '7 s lang alle Gegner in der Nähe auf der Karte – auch versteckte siehst du.' },
     { id: 'blink', name: 'Blink', type: 'aktiv', cd: 9, desc: 'Springt ein Stück in Zielrichtung.' },
     { id: 'shotgun', name: 'Schrotflinte', type: 'aktiv', cd: 7, desc: '6 Schrotkugeln im Fächer, kurze Reichweite.' },
-    { id: 'rocket', name: 'Rakete', type: 'aktiv', cd: 15, desc: 'Alle 15 s eine Rakete mit Explosion (60 + Flächenschaden).' },
-    { id: 'magnet', name: 'Magnetkugeln', type: 'passiv', cd: 0, desc: 'Deine Kugeln lenken leicht auf Gegner zu.' },
-    { id: 'invis', name: 'Unsichtbar', type: 'aktiv', cd: 26, desc: '4 s unsichtbar (bis du schießt).' },
-    { id: 'ricochet', name: 'Abpraller', type: 'passiv', cd: 0, desc: 'Kugeln prallen einmal von Felsen und Mauern ab.' },
-    { id: 'vampire', name: 'Lebensraub', type: 'passiv', cd: 0, desc: '35 % deines Schadens heilen dich.' },
-    { id: 'artillery', name: 'Artillerie', type: 'aktiv', cd: 25, desc: 'Schlag auf die Mausposition nach 1,5 s (bis 80 Schaden).' },
+    { id: 'rocket', name: 'Rakete', type: 'aktiv', cd: 12, desc: 'Alle 12 s eine schnelle Rakete: 80 Schaden + große Explosion.' },
+    { id: 'magnet', name: 'Magnetkugeln', type: 'passiv', cd: 0, desc: 'Deine Kugeln lenken spürbar auf Gegner zu.' },
+    { id: 'invis', name: 'Unsichtbar', type: 'aktiv', cd: 24, desc: '5 s unsichtbar (bis du schießt).' },
+    { id: 'ricochet', name: 'Abpraller', type: 'passiv', cd: 0, desc: 'Kugeln prallen bis zu zweimal von Felsen und Mauern ab.' },
+    { id: 'vampire', name: 'Lebensraub', type: 'passiv', cd: 0, desc: '40 % deines Schadens heilen dich.' },
+    { id: 'artillery', name: 'Artillerie', type: 'aktiv', cd: 22, desc: 'Schlag auf die Mausposition nach 1,5 s (bis 80 Schaden).' },
     { id: 'emp', name: 'EMP', type: 'aktiv', cd: 22, desc: 'Gegner in der Nähe 3 s verlangsamt, ohne Fähigkeit, langsamer schießend.' },
-    { id: 'wallhack', name: 'Wallhack + Aimbot', type: 'passiv', cd: 0, desc: 'Du siehst Gegner durch alles. Doppelte Gegner-Hitbox: was du triffst, trifft zu 100 %.' },
+    { id: 'overdrive', name: 'Übermacht', type: 'aktiv', cd: 24, desc: '6 s lang doppelte Feuerrate, 40 % mehr Schaden und schneller.', rank: 17 },
+    { id: 'wallhack', name: 'Wallhack + Aimbot', type: 'passiv', cd: 0, desc: 'Gegner durch alles sehen, deine Kugeln fliegen immer zum nächsten Gegner. Nur für die Top 3 Unreal-Spieler.', rank: 17, top3: true },
   ];
-  ABILITIES.forEach((a, i) => { a.rank = i; });
+  ABILITIES.forEach((a, i) => { if (a.rank == null) a.rank = i; });
   const ABILITY_BY_ID = Object.fromEntries(ABILITIES.map(a => [a.id, a]));
 
   // ---------------- Items ----------------
@@ -153,9 +154,13 @@
     if (it.rank != null) return rankInfo(user.rp).idx >= it.rank;
     return (user.owned || []).includes(id);
   }
-  function canUseAbility(user, id, cheatAll) {
+  // top3: Liste der pids der drei besten Unreal-Spieler
+  function canUseAbility(user, id, cheatAll, top3) {
     const a = ABILITY_BY_ID[id];
-    return !!a && (cheatAll || rankInfo(user.rp).idx >= a.rank);
+    if (!a) return false;
+    if (cheatAll) return true;
+    if (a.top3) return !!(top3 && top3.includes(user.pid));
+    return rankInfo(user.rp).idx >= a.rank;
   }
 
   const api = { RANK_TIERS, RANKS, rankInfo, tierFloor, matchRewards, ABILITIES, ABILITY_BY_ID, ITEMS, ITEM_BY_ID, CATS, DEFAULT_EQUIP, dayIndex, shopForDay, canUse, canUseAbility };

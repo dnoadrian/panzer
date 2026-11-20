@@ -2,7 +2,7 @@
 'use strict';
 
 const DEFAULT_SETTINGS = {
-  sens: 1, lock: true, vol: 80, quality: 'hoch', zoom: 1, shake: true, fps: true, fpsLimit: 0,
+  sens: 1, lock: false, vol: 80, quality: 'hoch', zoom: 1, shake: true, fps: true, fpsLimit: -1, v: 2,
   cross: '#3a3046', crossSize: 1,
   keys: { up: 'w', down: 's', left: 'a', right: 'd', fire: ' ', ability: 'f', block: 'shift', jump: ' ', spec: 'q', map: 'm' },
 };
@@ -12,6 +12,7 @@ const CROSS_COLORS = ['#3a3046', '#ffffff', '#e8402f', '#2fbf4a', '#2f7fe8', '#f
 function loadSettings() {
   const s = Object.assign({}, DEFAULT_SETTINGS, load('settings', {}));
   s.keys = Object.assign({}, DEFAULT_SETTINGS.keys, (load('settings', {}) || {}).keys || {});
+  if (!s.v || s.v < 2) { s.fpsLimit = -1; s.lock = false; s.v = 2; } // VSync ist am flüssigsten
   return s;
 }
 const settings = loadSettings();

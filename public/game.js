@@ -8,7 +8,8 @@ const G = {};
 const keys = {};
 const gm = { x: innerWidth / 2, y: innerHeight / 2, down: false, rdown: false };
 
-const DELAY = 75;   // ms Puffer für flüssige Bewegung anderer Panzer
+// Puffer für flüssige Bewegung anderer Panzer: passt sich den Netzwerk-Schwankungen an
+const DELAY_MIN = 50, DELAY_MAX = 180;
 const TILE = 256;   // Kachelgröße der vorgezeichneten Welt
 const TR = 16, SPEED = 85, LAKE_SLOW = 0.55;
 const SKY = '#9fd6f2';
@@ -22,7 +23,7 @@ function resetG() {
     particles: [], effects: [], floats: [], flash: new Map(), shake: 0, warned: false, lastCd: 99,
     miniStatic: null, lastFrame: performance.now(), hitMark: 0, killMark: 0, result: null, aim: 0, confetti: [], tutTimers: [],
     tiles: new Map(), tileScale: 0, sprites: new Map(), frame: 0, fps: { n: 0, t: performance.now() }, hud: {}, bigMap: false,
-    plat: null, deco: null, lowHp: false, lastBeat: 0,
+    plat: null, deco: null, lowHp: false, lastBeat: 0, delay: 80, jit: 10, lastArr: 0, prevCur: null, buckets: null,
   });
 }
 resetG();
@@ -120,6 +121,8 @@ function onState(s) {
   if (!inGame) return;
   const now = performance.now(), off = now - s.ts;
   G.offset = G.offset == null ? off : Math.min(G.offset + 0.5, off);
+  if (G.lastArr) { const gap = now - G.lastArr; G.jit = G.jit * 0.92 + Math.abs(gap - 25) * 0.08; }
+  G.lastArr = now;
   G.snaps.push(s);
   if (G.snaps.length > 60) G.snaps.shift();
   const mt = s.tanks.find(t => t.i === me.pid);
@@ -359,10 +362,29 @@ function buildDeco() {
     d.clouds.push({ x: cx, y: cy, r: w * 1.4, puffs });
   }
   G.deco = d;
+  // pro Kachel vorsortieren
+  const B = new Map(), add = (kind, o, r) => {
+    for (let ty = Math.floor((o.y - r) / TILE); ty <= Math.floor((o.y + r) / TILE); ty++)
+      for (let tx = Math.floor((o.x - r) / TILE); tx <= Math.floor((o.x + r) / TILE); tx++) {
+        const k = tx + ',' + ty; let b = B.get(k); if (!b) { b = { patches: [], flowers: [], tufts: [], clouds: [], pebbles: [] }; B.set(k, b); } b[kind].push(o);
+      }
+  };
+  for (const o of d.patches) add('patches', o, o.r * 1.4);
+  for (const o of d.flowers) add('flowers', o, 8);
+  for (const o of d.tufts) add('tufts', o, 10);
+  for (const o of d.pebbles) add('pebbles', o, 6);
+  for (const o of d.clouds) add('clouds', o, o.r);
+  G.buckets = B;
+}
+// Lage einer Kachel: ganz innen, ganz außen oder am Rand der Kuppe
+function plateauDist(x, y) {
+  const Pl = G.map.plateau, dx = x - Pl.cx, dy = y - Pl.cy; let u = Math.atan2(dy, dx) / (Math.PI * 2); u -= Math.floor(u); u *= Pl.r.length;
+  const i = Math.floor(u) % Pl.r.length, fr = u - Math.floor(u);
+  return Pl.r[i] + (Pl.r[(i + 1) % Pl.r.length] - Pl.r[i]) * fr - Math.hypot(dx, dy); // >0 = innen
 }
 function drawMountain(x2, m, i) {
   const cols = ['#8f7d6c', '#a8957f', '#c4b39c', '#ddd0bc'];
-  for (let k = 0; k < 4; k++) paper(x2, B(blobPts(m.x + k * 2, m.y - k * 9, m.r * (1 - k * 0.2), 11, i * 17 + k, 0.16)), cols[k], { border: 3, sx: 4, sy: 6, shadowCol: k ? 'rgba(40,28,60,.18)' : 'rgba(40,28,60,.28)' });
+  for (let k = 0; k < 4; k++) paper(x2, B(blobPts(m.x + k * 2, m.y - k * 9, m.r * 0.93 * (1 - k * 0.2), 11, i * 17 + k, 0.07)), cols[k], { border: 3, sx: 4, sy: 6, shadowCol: k ? 'rgba(40,28,60,.18)' : 'rgba(40,28,60,.28)' });
   const sx = m.x + 6, sy = m.y - 34, sr = m.r * 0.28, pts = [];
   for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2, rr = k % 2 ? sr * 0.7 : sr; pts.push([sx + Math.cos(a) * rr, sy + Math.sin(a) * rr]); }
   paper(x2, P(pts), '#ffffff', { border: 2, sx: 2, sy: 3, edgeCol: 'rgba(80,90,120,.3)' });
@@ -407,27 +429,35 @@ function buildTile(tx, ty) {
   x.scale(s, s); x.translate(-tx * TILE + 1, -ty * TILE + 1);
   const x0 = tx * TILE - 1, y0 = ty * TILE - 1, x1 = x0 + TILE + 2, y1 = y0 + TILE + 2;
   const hit = (o, r) => o.x + r > x0 && o.x - r < x1 && o.y + r > y0 && o.y - r < y1;
-  x.fillStyle = SKY; x.fillRect(x0, y0, TILE + 2, TILE + 2);
-  for (const cl of G.deco.clouds) if (hit(cl, cl.r)) paper(x, cl.puffs, '#ffffff', { border: 3, sx: 6, sy: 10, shadowCol: 'rgba(60,110,170,.18)', edge: false });
-  // Klippe: Papier-Gesteinsschichten
-  for (const [dy, col] of [[150, '#7d644b'], [105, '#987a57'], [62, '#b49466'], [26, '#ccae7c']]) paper(x, P(G.plat.map(([px, py]) => [px, py + dy])), col, { border: 3, sx: 0, sy: 6, shadowCol: 'rgba(40,28,60,.2)' });
+  const bk = G.buckets.get(tx + ',' + ty) || { patches: [], flowers: [], tufts: [], clouds: [], pebbles: [] };
+  const corners = [[x0, y0], [x1, y0], [x0, y1], [x1, y1], [(x0 + x1) / 2, (y0 + y1) / 2]].map(([cx, cy]) => plateauDist(cx, cy));
+  const inside = corners.every(d => d > 30), outside = corners.every(d => d < -400);
+  if (!inside) {
+    x.fillStyle = SKY; x.fillRect(x0, y0, TILE + 2, TILE + 2);
+    for (const cl of bk.clouds) paper(x, cl.puffs, '#ffffff', { border: 3, sx: 6, sy: 10, shadowCol: 'rgba(60,110,170,.18)', edge: false });
+    if (outside) return c;
+    // Klippe: Papier-Gesteinsschichten (nur am Rand der Kuppe)
+    for (const [dy, col] of [[150, '#7d644b'], [105, '#987a57'], [62, '#b49466'], [26, '#ccae7c']]) paper(x, P(G.plat.map(([px, py]) => [px, py + dy])), col, { border: 3, sx: 0, sy: 6, shadowCol: 'rgba(40,28,60,.2)' });
+  }
   // Wiese
-  x.save(); pathOf(x, [P(G.plat)]); x.clip();
+  x.save(); if (!inside) { pathOf(x, [P(G.plat)]); x.clip(); }
   x.fillStyle = '#8fd36f'; x.fillRect(x0, y0, TILE + 2, TILE + 2);
-  for (const p of G.deco.patches) if (hit(p, p.r)) { x.fillStyle = p.light ? 'rgba(190,240,150,.35)' : 'rgba(70,150,60,.18)'; pathOf(x, [B(blobPts(p.x, p.y, p.r, 9, p.seed, 0.3))]); x.fill(); }
+  for (const p of bk.patches) if (hit(p, p.r)) { x.fillStyle = p.light ? 'rgba(190,240,150,.35)' : 'rgba(70,150,60,.18)'; pathOf(x, [B(blobPts(p.x, p.y, p.r, 9, p.seed, 0.3))]); x.fill(); }
   x.fillStyle = fiberPattern(x); x.globalAlpha = 0.18; x.fillRect(x0, y0, TILE + 2, TILE + 2); x.globalAlpha = 1;
   x.strokeStyle = '#64b04a'; x.lineWidth = 2; x.lineCap = 'round'; x.beginPath();
-  for (const t of G.deco.tufts) if (hit(t, 10)) { x.moveTo(t.x - 4, t.y); x.lineTo(t.x - 2, t.y - 7); x.moveTo(t.x, t.y); x.lineTo(t.x + 1, t.y - 9); x.moveTo(t.x + 4, t.y); x.lineTo(t.x + 3, t.y - 6); }
+  for (const t of bk.tufts) { x.moveTo(t.x - 4, t.y); x.lineTo(t.x - 2, t.y - 7); x.moveTo(t.x, t.y); x.lineTo(t.x + 1, t.y - 9); x.moveTo(t.x + 4, t.y); x.lineTo(t.x + 3, t.y - 6); }
   x.stroke();
-  for (const p of G.deco.pebbles) if (hit(p, 6)) paper(x, C(p.x, p.y, p.r), '#d8d2c8', { border: 1.2, sx: 1, sy: 1.5, edge: false });
-  for (const f of G.deco.flowers) if (hit(f, 8)) {
+  for (const p of bk.pebbles) paper(x, C(p.x, p.y, p.r), '#d8d2c8', { border: 1.2, sx: 1, sy: 1.5, edge: false });
+  for (const f of bk.flowers) {
     const sh = []; for (let k = 0; k < 5; k++) { const a = k / 5 * 6.28; sh.push(C(f.x + Math.cos(a) * 3.4, f.y + Math.sin(a) * 3.4, 2.6)); }
     paper(x, sh, f.c, { border: 1.2, sx: 1, sy: 1.5, edge: false });
     paper(x, C(f.x, f.y, 1.7), '#f2a03f', { border: 0, shadow: false, edge: false });
   }
   x.restore();
-  x.strokeStyle = '#ffffff'; x.lineWidth = 6; x.lineJoin = 'round'; pathOf(x, [P(G.plat)]); x.stroke();
-  x.strokeStyle = 'rgba(58,48,70,.3)'; x.lineWidth = 1.5; x.stroke();
+  if (!inside) {
+    x.strokeStyle = '#ffffff'; x.lineWidth = 6; x.lineJoin = 'round'; pathOf(x, [P(G.plat)]); x.stroke();
+    x.strokeStyle = 'rgba(58,48,70,.3)'; x.lineWidth = 1.5; x.stroke();
+  }
   for (const l of G.map.lakes) if (hit(l, Math.max(l.rx, l.ry) + 20)) {
     paper(x, E(l.x, l.y, l.rx, l.ry), '#5fb5ea', { border: 4, sx: 0, sy: 4, shadowCol: 'rgba(40,80,40,.25)' });
     paper(x, E(l.x - l.rx * 0.08, l.y - l.ry * 0.1, l.rx * 0.72, l.ry * 0.66), '#8fd0f5', { border: 0, shadow: false, edge: false });
@@ -444,8 +474,14 @@ function buildTile(tx, ty) {
   }
   G.map.teleports.forEach((tp) => { if (hit(tp, 40)) { paper(x, C(tp.x, tp.y, tp.r + 8), '#c9a6ff', { border: 3.5, sx: 2, sy: 4 }); paper(x, C(tp.x, tp.y, tp.r - 2), '#7b4fd0', { border: 0, shadow: false }); } });
   for (const w of G.map.walls) if (hit({ x: w.x + w.w / 2, y: w.y + w.h / 2 }, Math.max(w.w, w.h))) drawWall(x, w);
-  G.map.rocks.forEach((k, i) => { if (hit(k, k.r + 12)) { paper(x, P(blobPts(k.x, k.y, k.r, 9, i * 31 + 5, 0.3)), '#bdb6c6', { border: 3, sx: 3, sy: 5 }); paper(x, P([[k.x - k.r * 0.5, k.y - k.r * 0.2], [k.x, k.y - k.r * 0.7], [k.x + k.r * 0.3, k.y - k.r * 0.1]]), '#d8d2e0', { border: 0, shadow: false, edge: false }); } });
-  for (const ml of G.map.mills) if (hit(ml, 60)) { paper(x, C(ml.x, ml.y, ml.r), '#efe2c6', { border: 3.5, sx: 4, sy: 6 }); paper(x, C(ml.x, ml.y, ml.r * 0.55), '#c9744a', { border: 2, shadow: false }); }
+  G.map.rocks.forEach((k, i) => { if (hit(k, k.r + 12)) { paper(x, P(blobPts(k.x, k.y, k.r * 0.95, 9, i * 31 + 5, 0.1)), '#bdb6c6', { border: 3, sx: 3, sy: 5 }); paper(x, P([[k.x - k.r * 0.5, k.y - k.r * 0.2], [k.x, k.y - k.r * 0.7], [k.x + k.r * 0.3, k.y - k.r * 0.1]]), '#d8d2e0', { border: 0, shadow: false, edge: false }); } });
+  for (const ml of G.map.mills) if (hit(ml, ml.r + 20)) {
+    paper(x, C(ml.x, ml.y, ml.r), '#c9c2b3', { border: 3.5, sx: 4, sy: 6 });
+    const r = rng(Math.round(ml.x));
+    for (let k = 0; k < 14; k++) { const a = k / 14 * Math.PI * 2, d = ml.r * (0.72 + r() * 0.12); paper(x, RR(ml.x + Math.cos(a) * d - 7, ml.y + Math.sin(a) * d - 5, 14, 10, 3), '#ddd6c8', { border: 1.2, shadow: false }); }
+    paper(x, C(ml.x, ml.y, ml.r * 0.52), '#efe2c6', { border: 3, sx: 3, sy: 5 });
+    paper(x, C(ml.x, ml.y, ml.r * 0.3), '#c9744a', { border: 2, shadow: false });
+  }
   G.map.mountains.forEach((m, i) => { if (hit(m, m.r + 30)) drawMountain(x, m, i); });
   G.map.trees.forEach((t) => { if (hit(t, t.r + 20)) drawTree(x, t); });
   return c;
@@ -456,18 +492,25 @@ function ensureScale() {
   if (Math.abs(s - G.tileScale) > 0.01) { G.tileScale = s; G.tiles.clear(); G.sprites.clear(); }
 }
 function drawTiles(vx0, vy0, vx1, vy1) {
-  let built = 0;
-  for (let ty = Math.floor(vy0 / TILE); ty <= Math.floor(vy1 / TILE); ty++) {
-    for (let tx = Math.floor(vx0 / TILE); tx <= Math.floor(vx1 / TILE); tx++) {
+  const now = performance.now();
+  let budget = G.tiles.size < 4 ? 40 : 5; // beim Start alles Sichtbare, danach höchstens 5 pro Bild
+  const tx0 = Math.floor(vx0 / TILE), tx1 = Math.floor(vx1 / TILE), ty0 = Math.floor(vy0 / TILE), ty1 = Math.floor(vy1 / TILE);
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+    const key = tx + ',' + ty;
+    let t = G.tiles.get(key);
+    if (!t && budget > 0) { t = { c: buildTile(tx, ty) }; G.tiles.set(key, t); budget--; }
+    if (!t) continue;
+    t.used = now;
+    ctx.drawImage(t.c, tx * TILE - 1, ty * TILE - 1, TILE + 2, TILE + 2);
+  }
+  // vorausschauend: einen Ring um den Bildschirm vorzeichnen (höchstens 1 pro Bild)
+  if (budget > 3) {
+    outer: for (let ty = ty0 - 1; ty <= ty1 + 1; ty++) for (let tx = tx0 - 1; tx <= tx1 + 1; tx++) {
       const key = tx + ',' + ty;
-      let t = G.tiles.get(key);
-      if (!t && built < 20) { t = { c: buildTile(tx, ty) }; G.tiles.set(key, t); built++; }
-      if (!t) continue;
-      t.used = G.frame;
-      ctx.drawImage(t.c, tx * TILE - 1, ty * TILE - 1, TILE + 2, TILE + 2);
+      if (!G.tiles.has(key)) { G.tiles.set(key, { c: buildTile(tx, ty), used: now }); break outer; }
     }
   }
-  if (G.tiles.size > 120) for (const [k, t] of G.tiles) if (G.frame - t.used > 90) G.tiles.delete(k);
+  if (G.tiles.size > 220) for (const [k, t] of G.tiles) if (now - t.used > 15000) G.tiles.delete(k);
 }
 
 // ---------- Büsche (Papier, gecacht) ----------
@@ -670,16 +713,21 @@ function drawGame(nowMs) {
   if (!G.map || !G.snaps.length || G.offset == null) return;
   ensureScale();
 
-  const rt = nowMs - G.offset - DELAY;
-  for (const s of G.snaps) if (s.ts > G.lastProcTs && s.ts <= rt) { processSnap(s, rt - s.ts > 500); G.lastProcTs = s.ts; G.cur = s; }
+  const want = clamp(40 + G.jit * 3, DELAY_MIN, DELAY_MAX);
+  G.delay += (want - G.delay) * Math.min(1, dt * 0.8);
+  const rt = nowMs - G.offset - G.delay;
+  for (const s of G.snaps) if (s.ts > G.lastProcTs && s.ts <= rt) { processSnap(s, rt - s.ts > 500); G.lastProcTs = s.ts; if (G.cur !== s) G.prevCur = G.cur; G.cur = s; }
   if (!G.cur) { G.cur = G.snaps[0]; processSnap(G.cur, false); G.lastProcTs = G.cur.ts; }
   while (G.snaps.length > 2 && G.snaps[1].ts <= rt) G.snaps.shift();
   const s = G.cur;
   const nxt = G.snaps.find(o => o.ts > s.ts);
   const k = nxt ? clamp((rt - s.ts) / (nxt.ts - s.ts), 0, 1) : 0;
   const nT = nxt ? new Map(nxt.tanks.map(t => [t.i, t])) : null;
+  const pv = !nxt && G.prevCur ? new Map(G.prevCur.tanks.map(t => [t.i, t])) : null;
+  const ek = pv ? clamp((rt - s.ts) / Math.max(10, s.ts - G.prevCur.ts), 0, 1) : 0;
   const tanks = s.tanks.map(tk => {
     const n = nT && nT.get(tk.i);
+    if (!n && pv) { const p = pv.get(tk.i); if (p && Math.hypot(p.x - tk.x, p.y - tk.y) < 40) return { ...tk, x: tk.x + (tk.x - p.x) * ek, y: tk.y + (tk.y - p.y) * ek }; }
     if (!n || Math.hypot(n.x - tk.x, n.y - tk.y) > 80) return { ...tk };
     return { ...tk, x: lerp(tk.x, n.x, k), y: lerp(tk.y, n.y, k), a: lerpAng(tk.a, n.a, k), ta: lerpAng(tk.ta, n.ta, k), hp: n.hp, alt: n.alt != null && tk.alt != null ? lerp(tk.alt, n.alt, k) : tk.alt };
   });
@@ -727,7 +775,7 @@ function drawGame(nowMs) {
   for (const ml of G.map.mills) {
     if (!vis(ml, 120)) continue;
     ctx.save(); ctx.translate(ml.x, ml.y); ctx.rotate(t * 0.8);
-    for (let j = 0; j < 4; j++) { ctx.rotate(Math.PI / 2); paper(ctx, RR(8, -9, 82, 18, 5), j % 2 ? '#fff6e0' : '#ffe1b0', { border: 3, sx: 5, sy: 8 }); }
+    for (let j = 0; j < 4; j++) { ctx.rotate(Math.PI / 2); paper(ctx, RR(6, -8, ml.r * 0.92, 16, 5), j % 2 ? '#fff6e0' : '#ffe1b0', { border: 3, sx: 5, sy: 8 }); }
     paper(ctx, C(0, 0, 10), '#8a5a2b', { border: 2.5, shadow: false });
     ctx.restore();
   }
@@ -745,7 +793,16 @@ function drawGame(nowMs) {
     if (bi >= 0 && mine) friendlyBush.add(bi);
     const alpha = tk.inv ? (mine ? 0.35 : 0.2) : 1;
     if (tk.tb) { ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); for (let j = -1; j <= 1; j++) { const bx = tk.x - Math.cos(tk.a) * 26 - Math.sin(tk.a) * j * 10, by = tk.y - Math.sin(tk.a) * 26 + Math.cos(tk.a) * j * 10; ctx.moveTo(bx, by); ctx.lineTo(bx - Math.cos(tk.a) * 22, by - Math.sin(tk.a) * 22); } ctx.stroke(); }
-    drawTank(ctx, tk.x, tk.y, tk.a, tk.ta, equipOf(tk.i), hashStr(tk.i), { scale: 1.12, alpha, flash: (G.flash.get(tk.i) || 0) > nowMs, t, roll: (tk.x + tk.y) * 0.4 });
+    const wet = inLake(tk.x, tk.y);
+    drawTank(ctx, tk.x, tk.y + (wet ? Math.sin(t * 3 + tk.x) * 1.2 : 0), tk.a, tk.ta, equipOf(tk.i), hashStr(tk.i), { scale: wet ? 1.04 : 1.12, alpha, flash: (G.flash.get(tk.i) || 0) > nowMs, t, roll: (tk.x + tk.y) * 0.4 });
+    if (wet) {
+      ctx.save(); ctx.translate(tk.x, tk.y); ctx.rotate(tk.a);
+      ctx.fillStyle = 'rgba(95,181,234,.62)'; ctx.beginPath(); ctx.ellipse(0, 0, 24, 21, 0, 0, 7); ctx.fill(); // Wasser über den Ketten
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 2.4;
+      for (let j = 0; j < 2; j++) { const p = (t * 0.8 + j * 0.5) % 1; ctx.globalAlpha = 1 - p; ctx.beginPath(); ctx.ellipse(tk.x, tk.y, 22 + p * 22, 18 + p * 18, 0, 0, 7); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+    }
     if (tk.bk || tk.dome) {
       const R = tk.dome ? 34 : 30;
       ctx.save();
@@ -754,6 +811,7 @@ function drawGame(nowMs) {
       for (const [lw, col] of [[5, '#ffffff'], [2.5, '#4f8ff0']]) { ctx.strokeStyle = col; ctx.lineWidth = lw; for (let j = 0; j < 6; j++) { const a0 = t * 4 + j * Math.PI / 3; ctx.beginPath(); ctx.arc(tk.x, tk.y, R, a0, a0 + 0.7); ctx.stroke(); } }
       ctx.restore();
     }
+    if (tk.od) { ctx.save(); ctx.globalAlpha = 0.5 + Math.sin(t * 12) * 0.2; ctx.strokeStyle = '#ff6b2a'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(tk.x, tk.y, 28 + Math.sin(t * 8) * 2, 0, 7); ctx.stroke(); ctx.restore(); if (Math.random() < dt * 20) burst(tk.x, tk.y, 1, ['#ff6b2a', '#ffe066'], { shape: 'star', sp: 40, life: 0.5, g: -30 }); }
     if (tk.emp && Math.random() < 0.5) { ctx.strokeStyle = '#7fd6ff'; ctx.lineWidth = 2; ctx.beginPath(); const a = Math.random() * 6.28; ctx.moveTo(tk.x + Math.cos(a) * 14, tk.y + Math.sin(a) * 14); ctx.lineTo(tk.x + Math.cos(a + 0.3) * 26, tk.y + Math.sin(a + 0.3) * 26); ctx.stroke(); }
     if (tk.hp < G.maxHp * 0.4 && Math.random() < dt * 8) burst(tk.x, tk.y, 1, ['#8d8798', '#b4aec0'], { shape: 'puff', sp: 15, life: 1.2, g: -25, s: 1.3 });
   }
@@ -928,7 +986,7 @@ function drawGame(nowMs) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const lm = latest.me, free = $('game').classList.contains('free');
   if (s.me.alive && lm.ph === 0 && !free) {
-    if (lm.rl > 0) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(gm.x, gm.y, 21 * settings.crossSize, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - lm.rl / G.fireCd)); ctx.stroke(); }
+    if (lm.rl > 0) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(gm.x, gm.y, 21 * settings.crossSize, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - lm.rl / (lm.fcd || G.fireCd))); ctx.stroke(); }
     drawCrosshair(ctx, gm.x, gm.y);
   } else if (!free && s.me.alive) { ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(gm.x, gm.y, 4, 0, 7); ctx.fill(); }
   drawHitmarker(nowMs);

@@ -295,13 +295,13 @@ function renderAbilities() {
   const grid = $('abilityGrid'); grid.innerHTML = '';
   const cheat = prof.cheats && prof.cheats.allab;
   for (const a of CAT.ABILITIES) {
-    const ok = CAT.canUseAbility(prof, a.id, cheat);
+    const ok = CAT.canUseAbility(prof, a.id, cheat, prof.isTop3 ? [prof.pid] : []);
     const d = el('div', 'item' + (prof.ability === a.id ? ' on' : '') + (ok ? '' : ' locked'));
     const c = document.createElement('canvas'); c.width = 168; c.height = 168;
     drawAbilityIcon(c.getContext('2d'), a.id, 84, 84, 140, !ok);
     d.append(el('div', 'cat', a.type === 'passiv' ? 'Passiv' : `Aktiv · ${a.cd} s`), c, el('div', 'n', a.name), el('div', 'l', a.desc));
     const req = el('div', 'l req');
-    req.textContent = ok ? (prof.ability === a.id ? 'Ausgewählt' : 'Freigeschaltet') : `Ab ${CAT.RANKS[a.rank].name}`;
+    req.textContent = ok ? (prof.ability === a.id ? 'Ausgewählt' : 'Freigeschaltet') : a.top3 ? `Top 3 Unreal: ${(prof.top3 || []).join(', ') || 'noch frei'}` : `Ab ${CAT.RANKS[a.rank].name}`;
     d.appendChild(req);
     if (ok) d.onclick = () => { prof.ability = a.id; send({ t: 'setAbility', id: a.id }); sfx.ability(); renderAbilities(); };
     grid.appendChild(d);

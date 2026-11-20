@@ -290,6 +290,12 @@ function drawAbilityIcon(ctx, id, x, y, size, locked) {
     case 'vampire': paper(ctx, B([[0, 16], [-15, 0], [-12, -12], [-3, -12], [0, -6], [3, -12], [12, -12], [15, 0]]), f('#d9332a'), o); break;
     case 'artillery': ctx.strokeStyle = f('#e8402f'); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 6, 12, 0, 7); ctx.arc(0, 6, 5, 0, 7); ctx.stroke(); paper(ctx, P([[-4, -20], [4, -20], [4, -8], [0, -3], [-4, -8]]), f('#4a4556'), { border: 1.5, shadow: false }); break;
     case 'emp': ctx.strokeStyle = f('#4f86e8'); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 17, 0, 7); ctx.stroke(); paper(ctx, P([[-3, -12], [6, -12], [1, -2], [7, -2], [-5, 13], [-1, 2], [-7, 2]]), f('#f7c843'), { border: 1.5, shadow: false }); break;
+    case 'overdrive': {
+      const p = []; for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, r = i % 2 ? 10 : 19; p.push([Math.cos(a) * r, Math.sin(a) * r]); }
+      paper(ctx, P(p), f('#ff6b2a'), o); paper(ctx, C(0, 0, 8), f('#ffe066'), { border: 0, shadow: false });
+      paper(ctx, P([[-2, -6], [4, -6], [0, 0], [4, 0], [-3, 8], [-1, 2], [-4, 2]]), f('#3a3046'), { border: 0, shadow: false, edge: false });
+      break;
+    }
     case 'wallhack': paper(ctx, E(0, 0, 18, 11), f('#ffffff'), o); paper(ctx, C(0, 0, 7), f('#e8402f'), { border: 0, shadow: false }); ctx.strokeStyle = f('#3a3046'); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 3, 0, 7); ctx.moveTo(-22, 0); ctx.lineTo(-12, 0); ctx.moveTo(12, 0); ctx.lineTo(22, 0); ctx.moveTo(0, -16); ctx.lineTo(0, -9); ctx.moveTo(0, 9); ctx.lineTo(0, 16); ctx.stroke(); break;
   }
   if (locked) { paper(ctx, [RR(-7, -2, 14, 11, 2)], '#6d6680', { border: 2, shadow: false }); ctx.strokeStyle = '#6d6680'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(0, -3, 4.5, Math.PI, 0); ctx.stroke(); }
