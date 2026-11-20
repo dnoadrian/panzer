@@ -299,7 +299,7 @@ function renderAbilities() {
     const c = document.createElement('canvas'); c.width = 168; c.height = 168;
     drawAbilityIcon(c.getContext('2d'), a.id, 84, 84, 140, !ok);
     d.append(el('div', 'cat', a.type === 'passiv' ? 'Passiv' : `Aktiv · ${a.cd} s`), c, el('div', 'n', a.name), el('div', 'l', a.desc));
-    const req = el('div', 'l'); req.style.fontWeight = '600';
+    const req = el('div', 'l req');
     req.textContent = ok ? (prof.ability === a.id ? 'Ausgewählt' : 'Freigeschaltet') : `Ab ${CAT.RANKS[a.rank].name}`;
     d.appendChild(req);
     if (ok) d.onclick = () => { prof.ability = a.id; send({ t: 'setAbility', id: a.id }); sfx.ability(); renderAbilities(); };
