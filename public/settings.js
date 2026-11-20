@@ -61,7 +61,7 @@ function renderSettings() {
   for (const c of CROSS_COLORS) {
     const b = document.createElement('button'); b.style.background = c; b.title = c;
     if (c === settings.cross) b.className = 'on';
-    b.onclick = () => { settings.cross = c; saveSettings(); renderSettings(); sfx.click(); };
+    b.onclick = () => { settings.cross = c; saveSettings(); renderSettings(); applyCrossCursor(); sfx.click(); };
     sw.appendChild(b);
   }
   drawCrossPreview();
@@ -107,7 +107,7 @@ $('sZoom').oninput = (e) => { settings.zoom = +e.target.value; $('sZoomV').textC
 $('sShake').onchange = (e) => { settings.shake = e.target.checked; saveSettings(); };
 $('sFps').onchange = (e) => { settings.fps = e.target.checked; saveSettings(); };
 $('sFpsLimit').onchange = (e) => { settings.fpsLimit = +e.target.value; saveSettings(); };
-$('sCrossSize').oninput = (e) => { settings.crossSize = +e.target.value; saveSettings(); drawCrossPreview(); };
+$('sCrossSize').oninput = (e) => { settings.crossSize = +e.target.value; saveSettings(); drawCrossPreview(); applyCrossCursor(); };
 $('btnSetClose').onclick = closeSettings;
 $('btnSetDone').onclick = () => { closeSettings(); sfx.click(); };
 $('btnSetReset').onclick = () => {
@@ -156,7 +156,18 @@ function openMenu() {
   $('game').classList.add('free');
 }
 function closeMenu() { $('gameMenu').classList.add('hidden'); updateCursor(); }
-function updateCursor() { const dead = !G.cur || !G.cur.me.alive; $('game').classList.toggle('free', dead || menuOpen() || settingsOpen()); }
+function updateCursor() { const dead = !G.cur || !G.cur.me.alive; $('game').classList.toggle('free', dead || menuOpen() || settingsOpen()); applyCrossCursor(); }
+// Der echte Mauszeiger wird im Spiel zum Fadenkreuz (kein Verzögern, nie unsichtbar)
+let crossCursorKey = '';
+function applyCrossCursor() {
+  const key = settings.cross + '|' + settings.crossSize;
+  if (key === crossCursorKey) return;
+  crossCursorKey = key;
+  const half = Math.ceil(19 * settings.crossSize) + 3, size = Math.min(128, half * 2);
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  drawCrosshair(c.getContext('2d'), size / 2, size / 2);
+  document.documentElement.style.setProperty('--cross-cursor', `url(${c.toDataURL()}) ${size / 2} ${size / 2}, crosshair`);
+}
 function leaveGame() {
   closeMenu();
   if (document.pointerLockElement) document.exitPointerLock();

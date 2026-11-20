@@ -309,48 +309,117 @@ function drawCrown(ctx, x, y, s = 1) {
 }
 
 // Panzer-Leuchtspur: x,y = Kugel, a = Richtung, team = Teamfarbe
-function drawTracer(ctx, id, x, y, a, teamCol, t, kind) {
-  const cx = Math.cos(a), cy = Math.sin(a), L = kind === 1 ? 46 : 40;
-  ctx.lineCap = 'round';
-  switch (id) {
-    case 'feuer': case 'eis': case 'gift': case 'goldspur': {
-      const col = { feuer: ['#ffd25c', '#ff5a1f'], eis: ['#ffffff', '#5ac8fa'], gift: ['#d6ff6a', '#3fbf3a'], goldspur: ['#fff3b0', '#f2b705'] }[id];
-      for (let i = 0; i < 6; i++) {
-        const k = i / 6, w = (1 - k) * 7 + 1.5;
-        ctx.fillStyle = i % 2 ? col[0] : col[1]; ctx.globalAlpha = 1 - k * 0.8;
-        ctx.beginPath(); ctx.arc(x - cx * k * L + Math.sin(t * 30 + i) * 1.5 * k, y - cy * k * L + Math.cos(t * 27 + i) * 1.5 * k, w / 2, 0, 7); ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-      if (id === 'goldspur') { ctx.fillStyle = '#fff'; for (let i = 0; i < 3; i++) { const k = (t * 3 + i / 3) % 1; ctx.fillRect(x - cx * k * L + (i - 1) * 4, y - cy * k * L + (i - 1) * 3, 1.6, 1.6); } }
-      break;
+// Leuchtspuren: Band + Glühen + Partikel. Rein zeitbasiert (kein Zustand), damit es überall gleich aussieht.
+function tracerRibbon(ctx, at, w, col, alpha, wave, t, len = 1, off = 0) {
+  const n = 10, Lp = [], Rp = [];
+  for (let i = 0; i <= n; i++) {
+    const q = i / n, k = q * len, hw = w / 2 * Math.pow(1 - q, 0.75) + 0.2;
+    const o = off * (1 - q * 0.35) + (wave ? Math.sin(t * 16 - k * 9) * wave * q : 0);
+    Lp.push(at(k, o + hw)); Rp.push(at(k, o - hw));
+  }
+  ctx.globalAlpha = alpha; ctx.fillStyle = col; ctx.beginPath();
+  ctx.moveTo(Lp[0][0], Lp[0][1]);
+  for (const p of Lp) ctx.lineTo(p[0], p[1]);
+  for (let i = Rp.length - 1; i >= 0; i--) ctx.lineTo(Rp[i][0], Rp[i][1]);
+  ctx.closePath(); ctx.fill();
+  const h = at(0, off); ctx.beginPath(); ctx.arc(h[0], h[1], w / 2, 0, 7); ctx.fill();
+  ctx.globalAlpha = 1;
+}
+function tracerSparks(ctx, at, t, n, rate, spread, size, cols, shape, a) {
+  for (let i = 0; i < n; i++) {
+    const cyc = t * rate + i / n, k = cyc % 1, seed = Math.floor(cyc) * 7.13 + i * 12.9898;
+    const o = Math.sin(seed) * spread * (0.3 + k), p = at(0.15 + k * 1.05, o), sz = size * (1 - k * 0.65);
+    ctx.globalAlpha = Math.max(0, 1 - k); ctx.fillStyle = cols[i % cols.length]; ctx.strokeStyle = cols[(i + 1) % cols.length];
+    switch (shape) {
+      case 'dia': ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(a + t * 4 + i); ctx.beginPath(); ctx.moveTo(0, -sz * 1.4); ctx.lineTo(sz * 0.7, 0); ctx.lineTo(0, sz * 1.4); ctx.lineTo(-sz * 0.7, 0); ctx.closePath(); ctx.fill(); ctx.restore(); break;
+      case 'ring': ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(p[0], p[1], sz, 0, 7); ctx.fill(); ctx.stroke(); break;
+      case 'twinkle': { const tw = sz * (0.6 + 0.4 * Math.sin(t * 20 + i * 2)); ctx.beginPath(); ctx.moveTo(p[0] - tw, p[1]); ctx.lineTo(p[0] - tw * 0.2, p[1] - tw * 0.2); ctx.lineTo(p[0], p[1] - tw); ctx.lineTo(p[0] + tw * 0.2, p[1] - tw * 0.2); ctx.lineTo(p[0] + tw, p[1]); ctx.lineTo(p[0] + tw * 0.2, p[1] + tw * 0.2); ctx.lineTo(p[0], p[1] + tw); ctx.lineTo(p[0] - tw * 0.2, p[1] + tw * 0.2); ctx.closePath(); ctx.fill(); break; }
+      default: ctx.beginPath(); ctx.arc(p[0], p[1], sz, 0, 7); ctx.fill();
     }
+  }
+  ctx.globalAlpha = 1;
+}
+function drawTracer(ctx, id, x, y, a, teamCol, t, kind) {
+  const cx = Math.cos(a), cy = Math.sin(a), px = -cy, py = cx, L = kind === 1 ? 62 : 54;
+  const at = (k, o = 0) => [x - cx * k * L + px * o, y - cy * k * L + py * o];
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  switch (id) {
+    case 'feuer':
+      tracerRibbon(ctx, at, 15, '#ff7a1f', 0.22, 2.5, t);
+      tracerRibbon(ctx, at, 10, '#ff5a1f', 0.95, 2.6, t, 0.9);
+      tracerRibbon(ctx, at, 6, '#ffb52e', 1, 1.8, t, 0.7);
+      tracerRibbon(ctx, at, 2.6, '#fff4c8', 1, 0, t, 0.4);
+      tracerSparks(ctx, at, t, 7, 2.4, 9, 2, ['#ffd25c', '#ff8a2a', '#ff5a1f'], 'dot', a);
+      break;
+    case 'eis':
+      tracerRibbon(ctx, at, 13, '#bfefff', 0.4, 0, t);
+      tracerRibbon(ctx, at, 7, '#5ac8fa', 0.95, 0, t, 0.9);
+      tracerRibbon(ctx, at, 2.6, '#ffffff', 1, 0, t, 0.6);
+      tracerSparks(ctx, at, t, 6, 1.7, 9, 3.2, ['#ffffff', '#a8e6ff', '#5ac8fa'], 'dia', a);
+      tracerSparks(ctx, at, t + 0.33, 3, 1.1, 12, 3, ['#ffffff'], 'twinkle', a);
+      break;
+    case 'gift':
+      tracerRibbon(ctx, at, 12, '#3fbf3a', 0.25, 3, t);
+      tracerRibbon(ctx, at, 7, '#62d43a', 0.95, 2.8, t, 0.9);
+      tracerRibbon(ctx, at, 2.5, '#e4ff8a', 1, 1.2, t, 0.5);
+      tracerSparks(ctx, at, t, 6, 1.4, 11, 2.8, ['#d6ff6a', '#3fbf3a'], 'ring', a);
+      break;
+    case 'goldspur':
+      tracerRibbon(ctx, at, 13, '#ffe27a', 0.3, 0, t);
+      tracerRibbon(ctx, at, 7, '#f2b705', 1, 0, t, 0.95);
+      tracerRibbon(ctx, at, 3, '#fff3b0', 1, 0, t, 0.65);
+      tracerSparks(ctx, at, t, 7, 1.3, 11, 3.4, ['#ffffff', '#fff3b0', '#ffd84a'], 'twinkle', a);
+      break;
     case 'regenbogen-spur': {
       const cols = ['#e8402f', '#f2a03f', '#f7d34a', '#4fb85a', '#4f86e8', '#9b6be0'];
-      cols.forEach((col, i) => { ctx.strokeStyle = col; ctx.lineWidth = 2.2; const o = (i - 2.5) * 1.9; ctx.beginPath(); ctx.moveTo(x - cx * L - cy * o, y - cy * L + cx * o); ctx.lineTo(x - cy * o, y + cx * o); ctx.stroke(); });
+      tracerRibbon(ctx, at, 16, '#ffffff', 0.35, 0, t);
+      cols.forEach((col, i) => tracerRibbon(ctx, at, 3, col, 1, 1.6, t + i * 0.03, 1, (i - 2.5) * 2.2));
+      tracerSparks(ctx, at, t, 5, 1.2, 12, 3, ['#ffffff', '#fff3b0'], 'twinkle', a);
       break;
     }
-    case 'herzen': case 'sterne': {
-      for (let i = 1; i <= 3; i++) {
-        const px = x - cx * i * 12, py = y - cy * i * 12, s = 5 - i;
-        ctx.save(); ctx.translate(px, py); ctx.rotate(t * 3 + i); ctx.globalAlpha = 1 - i * 0.22;
-        if (id === 'herzen') paper(ctx, B([[0, s * 1.4], [-s * 1.4, 0], [-s, -s], [0, -s * 0.4], [s, -s], [s * 1.4, 0]]), '#ff5c8a', { border: 1.2, shadow: false });
-        else { const p = []; for (let k = 0; k < 10; k++) { const aa = -Math.PI / 2 + k * Math.PI / 5, r = k % 2 ? s * 0.5 : s * 1.3; p.push([Math.cos(aa) * r, Math.sin(aa) * r]); } paper(ctx, P(p), '#ffd84a', { border: 1.2, shadow: false }); }
+    case 'herzen': {
+      tracerRibbon(ctx, at, 10, '#ff9ec0', 0.45, 1.5, t);
+      tracerRibbon(ctx, at, 4, '#ff5c8a', 0.9, 1.2, t, 0.6);
+      for (let i = 0; i < 4; i++) {
+        const k = (t * 1.6 + i / 4) % 1, p = at(0.25 + k * 0.85, Math.sin(t * 5 + i * 2) * 5), sz = 5.2 * (1 - k * 0.55);
+        ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(a + Math.PI / 2 + Math.sin(t * 6 + i) * 0.4); ctx.globalAlpha = 1 - k * 0.8;
+        paper(ctx, B([[0, sz * 1.3], [-sz * 1.4, 0], [-sz, -sz], [0, -sz * 0.35], [sz, -sz], [sz * 1.4, 0]]), i % 2 ? '#ff5c8a' : '#ff8fb1', { border: 1.2, shadow: false });
         ctx.restore();
       }
-      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'sterne': {
+      tracerRibbon(ctx, at, 11, '#fff1a8', 0.45, 0, t);
+      tracerRibbon(ctx, at, 4, '#ffd84a', 1, 0, t, 0.75);
+      for (let i = 0; i < 4; i++) {
+        const k = (t * 1.5 + i / 4) % 1, p = at(0.2 + k * 0.9, Math.sin(i * 2.4 + Math.floor(t * 1.5 + i / 4)) * 7), sz = 5.5 * (1 - k * 0.6);
+        ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(t * 4 + i); ctx.globalAlpha = 1 - k * 0.8;
+        const pts = []; for (let q = 0; q < 10; q++) { const aa = -Math.PI / 2 + q * Math.PI / 5, r = q % 2 ? sz * 0.45 : sz; pts.push([Math.cos(aa) * r, Math.sin(aa) * r]); }
+        paper(ctx, P(pts), i % 2 ? '#ffd84a' : '#ffe98a', { border: 1.2, shadow: false });
+        ctx.restore();
+      }
+      tracerSparks(ctx, at, t, 3, 2, 10, 2.4, ['#ffffff'], 'twinkle', a);
       break;
     }
     case 'blitz': {
-      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(x, y);
-      const r = rng(Math.floor(t * 20));
-      for (let i = 1; i <= 4; i++) { const k = i / 4, j = (r() - 0.5) * 10; ctx.lineTo(x - cx * k * L - cy * j, y - cy * k * L + cx * j); }
-      ctx.stroke(); ctx.strokeStyle = '#7fd6ff'; ctx.lineWidth = 2.4; ctx.stroke();
+      tracerRibbon(ctx, at, 14, '#7fd6ff', 0.25, 0, t);
+      const r = rng(Math.floor(t * 24));
+      for (const [lw, col] of [[6, 'rgba(127,214,255,.55)'], [3.4, '#ffffff'], [1.6, '#7fd6ff']]) {
+        ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(x, y);
+        const rr = rng(Math.floor(t * 24));
+        for (let i = 1; i <= 6; i++) { const k = i / 6, j = (rr() - 0.5) * 12 * (0.4 + k); const p = at(k, j); ctx.lineTo(p[0], p[1]); }
+        ctx.stroke();
+      }
+      // kleiner Seitenast
+      const k0 = 0.3 + r() * 0.3, b0 = at(k0, 0), b1 = at(k0 + 0.25, (r() - 0.5) * 22);
+      ctx.strokeStyle = '#bfeaff'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(b0[0], b0[1]); ctx.lineTo(b1[0], b1[1]); ctx.stroke();
+      tracerSparks(ctx, at, t, 4, 3, 10, 1.8, ['#ffffff', '#7fd6ff'], 'dot', a);
       break;
     }
-    default: {
-      const g = ctx.createLinearGradient(x - cx * L, y - cy * L, x, y);
-      g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, teamCol);
-      ctx.strokeStyle = g; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(x - cx * L, y - cy * L); ctx.lineTo(x, y); ctx.stroke();
-    }
+    default:
+      tracerRibbon(ctx, at, 10, teamCol, 0.25, 0, t);
+      tracerRibbon(ctx, at, 5.5, teamCol, 0.9, 0, t, 0.95);
+      tracerRibbon(ctx, at, 2.2, '#ffffff', 0.95, 0, t, 0.5);
   }
+  ctx.restore();
 }

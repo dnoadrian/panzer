@@ -306,8 +306,9 @@ addEventListener('mousemove', (e) => {
   if (document.pointerLockElement === cv) {
     gm.x = clamp(gm.x + e.movementX * settings.sens, 0, innerWidth);
     gm.y = clamp(gm.y + e.movementY * settings.sens, 0, innerHeight);
-  } else if (e.target === cv) { gm.x = e.clientX; gm.y = e.clientY; }
+  } else { gm.x = e.clientX; gm.y = e.clientY; }
 });
+document.addEventListener('pointerlockchange', () => $('game').classList.toggle('locked', document.pointerLockElement === cv));
 cv.addEventListener('pointerdown', (e) => {
   const alive = G.cur && G.cur.me.alive;
   if (alive && settings.lock && document.pointerLockElement !== cv && inGame) {
@@ -987,8 +988,8 @@ function drawGame(nowMs) {
   const lm = latest.me, free = $('game').classList.contains('free');
   if (s.me.alive && lm.ph === 0 && !free) {
     if (lm.rl > 0) { ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(gm.x, gm.y, 21 * settings.crossSize, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - lm.rl / (lm.fcd || G.fireCd))); ctx.stroke(); }
-    drawCrosshair(ctx, gm.x, gm.y);
-  } else if (!free && s.me.alive) { ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(gm.x, gm.y, 4, 0, 7); ctx.fill(); }
+    if (document.pointerLockElement === cv) drawCrosshair(ctx, gm.x, gm.y);
+  } else if (!free && s.me.alive && document.pointerLockElement === cv) { ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(gm.x, gm.y, 4, 0, 7); ctx.fill(); }
   drawHitmarker(nowMs);
   if (G.lowHp && nowMs - G.lastBeat > 900) { G.lastBeat = nowMs; sfx.heart(); }
   if (G.confetti.length) {
