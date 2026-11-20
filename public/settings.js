@@ -3,11 +3,11 @@
 
 const DEFAULT_SETTINGS = {
   sens: 1, lock: true, vol: 80, quality: 'hoch', zoom: 1, shake: true, fps: true, fpsLimit: 0,
-  cross: '#2b2620', crossSize: 1,
-  keys: { up: 'w', down: 's', left: 'a', right: 'd', fire: ' ', block: 'shift', jump: ' ', spec: 'q', map: 'm' },
+  cross: '#3a3046', crossSize: 1,
+  keys: { up: 'w', down: 's', left: 'a', right: 'd', fire: ' ', ability: 'f', block: 'shift', jump: ' ', spec: 'q', map: 'm' },
 };
-const KEY_LABELS = { up: 'Vorwärts / hoch', down: 'Rückwärts / runter', left: 'Links', right: 'Rechts', fire: 'Schießen', block: 'Blocken', jump: 'Aus dem Bus springen', spec: 'Nächsten Spieler zuschauen', map: 'Große Karte' };
-const CROSS_COLORS = ['#2b2620', '#ffffff', '#e8402f', '#2fbf4a', '#2f7fe8', '#f2b705', '#d040d0'];
+const KEY_LABELS = { up: 'Vorwärts / hoch', down: 'Rückwärts / runter', left: 'Links', right: 'Rechts', fire: 'Schießen', ability: 'Fähigkeit', block: 'Blocken', jump: 'Aus dem Bus springen', spec: 'Nächsten Spieler zuschauen', map: 'Große Karte' };
+const CROSS_COLORS = ['#3a3046', '#ffffff', '#e8402f', '#2fbf4a', '#2f7fe8', '#f2b705', '#d040d0'];
 
 function loadSettings() {
   const s = Object.assign({}, DEFAULT_SETTINGS, load('settings', {}));
@@ -35,20 +35,20 @@ let waitingKey = null;
 function openSettings() {
   renderSettings();
   $('settings').classList.remove('hidden');
-  $('btnSetLeave').classList.add('hidden');
   if (document.pointerLockElement) document.exitPointerLock();
   for (const k in keys) keys[k] = false;
 }
 function closeSettings() {
   waitingKey = null;
   $('settings').classList.add('hidden');
+  if (typeof updateCursor === 'function' && screen === 'game') updateCursor();
 }
 const settingsOpen = () => !$('settings').classList.contains('hidden');
 
 function renderSettings() {
   $('sSens').value = settings.sens; $('sSensV').textContent = settings.sens.toFixed(2);
   $('sLock').checked = settings.lock;
-  $('sSound').checked = profile.sound;
+  $('sSound').checked = local.sound;
   $('sVol').value = settings.vol; $('sVolV').textContent = settings.vol + '%';
   $('sQual').value = settings.quality;
   $('sZoom').value = settings.zoom; $('sZoomV').textContent = Math.round(settings.zoom * 100) + '%';
@@ -77,7 +77,7 @@ function renderSettings() {
 function drawCrossPreview() {
   const c = $('sCrossPrev'), x = c.getContext('2d');
   x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, c.width, c.height);
-  x.fillStyle = '#f7f1e1'; x.fillRect(0, 0, c.width, c.height);
+  x.fillStyle = '#9fdc7a'; x.fillRect(0, 0, c.width, c.height);
   x.scale(2, 2);
   drawCrosshair(x, 24, 24, 0, false);
 }
@@ -98,7 +98,7 @@ function drawCrosshair(c2, x, y, reload, hitFlash) {
 // Eingaben im Panel
 $('sSens').oninput = (e) => { settings.sens = +e.target.value; $('sSensV').textContent = settings.sens.toFixed(2); saveSettings(); };
 $('sLock').onchange = (e) => { settings.lock = e.target.checked; saveSettings(); };
-$('sSound').onchange = (e) => { profile.sound = e.target.checked; save('sound', profile.sound); renderSoundBtn(); };
+$('sSound').onchange = (e) => { local.sound = e.target.checked; save('sound', local.sound); renderSoundBtn(); };
 $('sVol').oninput = (e) => { settings.vol = +e.target.value; $('sVolV').textContent = settings.vol + '%'; saveSettings(); };
 $('sVol').onchange = () => sfx.hit();
 $('sQual').onchange = (e) => { settings.quality = e.target.value; saveSettings(); };
@@ -110,14 +110,11 @@ $('sCrossSize').oninput = (e) => { settings.crossSize = +e.target.value; saveSet
 $('btnSetClose').onclick = closeSettings;
 $('btnSetDone').onclick = () => { closeSettings(); sfx.click(); };
 $('btnSetReset').onclick = () => {
-  const snd = profile.sound;
   Object.assign(settings, JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
-  profile.sound = snd;
   saveSettings(); renderSettings(); toast('Einstellungen zurückgesetzt');
 };
-$('btnSetLeave').onclick = () => { closeSettings(); leaveGame(); };
 $('btnDelete').onclick = () => {
-  if (!confirm('Konto wirklich löschen? Name, Rang, Freunde und Skins sind danach weg.')) return;
+  if (!confirm('Konto wirklich löschen? Name, Rang, Zahnräder, Freunde und Items sind danach weg.')) return;
   send({ t: 'deleteAccount' });
   for (const k of ['pid', 'name', 'rp', 'skin', 'friends', 'recent', 'tut', 'settings', 'xp']) { try { localStorage.removeItem(KEY(k)); } catch { /* egal */ } }
   setTimeout(() => location.reload(), 300);
@@ -137,6 +134,7 @@ addEventListener('keydown', (e) => {
     }
     settings.keys[waitingKey] = k;
     saveSettings();
+    if (typeof renderAbilities === 'function') renderAbilities();
   }
   waitingKey = null;
   renderSettings();
@@ -154,8 +152,10 @@ function openMenu() {
   const alive = G.cur && G.cur.me.alive;
   $('mHint').textContent = alive ? 'Das Spiel läuft weiter, während das Menü offen ist.' : 'Esc schließt das Menü';
   $('gameMenu').classList.remove('hidden');
+  $('game').classList.add('free');
 }
-function closeMenu() { $('gameMenu').classList.add('hidden'); }
+function closeMenu() { $('gameMenu').classList.add('hidden'); updateCursor(); }
+function updateCursor() { const dead = !G.cur || !G.cur.me.alive; $('game').classList.toggle('free', dead || menuOpen() || settingsOpen()); }
 function leaveGame() {
   closeMenu();
   if (document.pointerLockElement) document.exitPointerLock();
@@ -164,6 +164,7 @@ function leaveGame() {
 $('btnMenu').onclick = (e) => { e.stopPropagation(); sfx.click(); menuOpen() ? closeMenu() : openMenu(); };
 $('mResume').onclick = () => { sfx.click(); closeMenu(); };
 $('mSettings').onclick = () => { sfx.click(); closeMenu(); openSettings(); };
+$('mFull').onclick = () => { sfx.click(); toggleFullscreen(); };
 $('mLeave').onclick = () => {
   sfx.click();
   const alive = G.cur && G.cur.me.alive;

@@ -1,54 +1,24 @@
-// PANZER – Server (Battle Royale)
-// Liefert die Webseite aus, verwaltet Freunde/Partys/Matchmaking und berechnet die Spiele.
+// PANZER – Server: Webseite, Konten, Freunde, Party, Matchmaking, Shop, Admin
 'use strict';
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
+const DB = require('./lib/db');
+const CAT = require('./public/catalog.js');
+const createEngine = require('./lib/match');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-
-// ================= Spielwerte =================
-const MAP = 2600;            // Kartengröße (Quadrat) – gespielt wird auf einer Bergkuppe darin
-const TR = 16;               // Panzer-Radius (Kollision)
-const HIT_R = 21;            // Treffer-Radius (etwas großzügiger als der Panzer)
-const BLOCK_TIME = 1.2, BLOCK_CD = 7; // Blocken: Dauer und Abklingzeit
-const BR = 4;                // Kugel-Radius
-const MAX_HP = 150;
-const SPEED = 80;            // Grundtempo (langsam & taktisch)
-const SLOPE_W = 110;         // für Steigungsberechnung
-const BSPEED = 400;
-const BLIFE = 1.5;           // Reichweite ~600
-const DMG = 25;              // Schaden pro Treffer (6 Treffer = eliminiert)
-const KILL_HEAL = 50;        // Heilung für eine Eliminierung
-const FIRE_CD = 1.1;         // Sekunden zwischen zwei Schüssen
-const REGEN_DELAY = 5, REGEN = 6; // nach 5 s ohne Schaden repariert sich der Panzer
+const ADMIN_USER = (process.env.ADMIN_USER || 'adrian').toLowerCase();
+const ADMIN_PASS = process.env.ADMIN_PASS || '1234';
+const MM_WAIT = +(process.env.MM_WAIT || 12);      // so lange wird auf weitere echte Spieler gewartet
 const PARTY_MAX = 4;
-const VIEW_R = 1150;         // was ein Spieler vom Server gezeigt bekommt
-const BUS_WAIT = 3;          // Sekunden bis der Kampfbus losfliegt
-const BUS_DUR = 14;          // Flugdauer über die Karte
-const DROP_TIME = 4;         // Fallschirm-Dauer
-const DROP_SPEED = 190;      // Steuern am Fallschirm
-const BUSH_HP = 1;           // ein Schuss und der Busch ist weg
-const HILL_BLOCK = 0.45;     // so viel höher darf der Hang sein, bevor er eine Kugel schluckt
-const REVEAL = 1.2;          // nach dem Schießen kurz sichtbar (auch im Busch)
-const FAST = process.env.PANZER_FAST === "1" ? 0.12 : 1; // nur zum Testen: Sturm/Bus viel schneller
-// Ganze Runde ca. 1:30: Bus (3 s Start + 14 s Flug) + Sturm 73 s bis komplett zu
-const ZONE_PHASES = [
-  { wait: 9, shrink: 8, r: 880, dps: 3 },
-  { wait: 8, shrink: 7, r: 520, dps: 5 },
-  { wait: 7, shrink: 7, r: 290, dps: 8 },
-  { wait: 6, shrink: 6, r: 130, dps: 12 },
-  { wait: 5, shrink: 10, r: 0, dps: 18 },
-].map(p => ({ ...p, wait: p.wait * FAST, shrink: p.shrink * FAST }));
-const BOT_SKINS = ['rot', 'blau', 'gruen', 'orange', 'lila', 'tuerkis', 'grau', 'pink'];
-const BOT_NAMES = ['Otto', 'Kalle', 'Gerd', 'Franz', 'Heinz', 'Rudi', 'Bruno', 'Lotte', 'Hilde', 'Emil', 'Fritz', 'Greta',
-  'Paul', 'Ida', 'Kurt', 'Erna', 'Hugo', 'Frieda', 'Willi', 'Elli', 'Karl', 'Mia', 'Jonas', 'Lena'];
+const MODES = { solo: { size: 1, total: 10, name: 'Solo' }, duo: { size: 2, total: 10, name: 'Duo' }, squad: { size: 4, total: 12, name: 'Squad' } };
 
 const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
+  '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json',
 };
 
 // ================= Webseite =================
@@ -70,146 +40,81 @@ const httpServer = http.createServer((req, res) => {
 let idc = 0;
 const uid = (p) => p + (++idc).toString(36) + Math.random().toString(36).slice(2, 6);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-const lerp = (a, b, k) => a + (b - a) * k;
-const normAngle = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
-const turnTo = (cur, target, k) => cur + normAngle(target - cur) * Math.min(1, k);
 const nowS = () => Date.now() / 1000;
-function rng(seed) {
-  let s = (seed >>> 0) || 1;
-  return () => { s = (s ^ (s << 13)) >>> 0; s = (s ^ (s >>> 17)) >>> 0; s = (s ^ (s << 5)) >>> 0; return s / 4294967296; };
-}
+const validPid = (p) => /^[a-z0-9]{8,40}$/.test(String(p));
 function cleanName(n) {
-  const s = String(n || '')
+  return String(n || '')
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, '')
     .replace(/[<>&"'`\\]/g, '').replace(/\s+/g, ' ').trim().slice(0, 16);
-  return s || 'Panzerfahrer';
-}
-const cleanSkin = (s) => (/^[a-z0-9-]{1,20}$/.test(String(s)) ? String(s) : 'rot');
-const validPid = (p) => /^[a-z0-9]{8,40}$/.test(String(p));
-
-// ================= Karte =================
-// Höhe 0 (flach) bis 1 (Bergplateau). Hänge dazwischen sind befahrbar.
-function heightAt(map, x, y) {
-  let h = 0;
-  for (const hl of map.hills) {
-    const d = Math.hypot(x - hl.x, y - hl.y);
-    if (d >= hl.r) continue;
-    if (d <= hl.p) return 1;
-    let k = (hl.r - d) / (hl.r - hl.p);
-    k = k * k * (3 - 2 * k);
-    if (k > h) h = k;
-  }
-  return h;
-}
-function bushAt(map, x, y) {
-  for (let i = 0; i < map.bushes.length; i++) {
-    const b = map.bushes[i];
-    if (b.hp > 0 && Math.hypot(x - b.x, y - b.y) < b.r) return i;
-  }
-  return -1;
-}
-function rockAt(map, x, y, r) {
-  for (const k of map.rocks) if (Math.hypot(x - k.x, y - k.y) < k.r + r) return true;
-  return false;
 }
 
-// Umriss der Bergkuppe: Radius je Winkel (72 Stützpunkte)
-function makePlateau(rnd) {
-  const N = 140, base = MAP * 0.44, waves = [];
-  for (let i = 0; i < 5; i++) waves.push({ a: rnd() * 6.283, amp: (0.04 + rnd() * 0.05) / (i * 0.5 + 1), f: i + 2 });
-  for (let i = 0; i < 3; i++) waves.push({ a: rnd() * 6.283, amp: 0.008 + rnd() * 0.01, f: 13 + i * 9 }); // felsige Zacken
-  const r = [];
-  for (let i = 0; i < N; i++) {
-    const th = i / N * Math.PI * 2;
-    let k = 1;
-    for (const w of waves) k += w.amp * Math.sin(w.f * th + w.a);
-    k += (rnd() - 0.5) * 0.012;
-    r.push(Math.round(base * k));
-  }
-  return { cx: MAP / 2, cy: MAP / 2, r };
-}
-function plateauR(map, ang) {
-  const P = map.plateau, N = P.r.length;
-  let u = ang / (Math.PI * 2); u -= Math.floor(u); u *= N;
-  const i = Math.floor(u) % N, fr = u - Math.floor(u);
-  return P.r[i] + (P.r[(i + 1) % N] - P.r[i]) * fr;
-}
-function onPlateau(map, x, y, margin = 0) {
-  const P = map.plateau, dx = x - P.cx, dy = y - P.cy;
-  return Math.hypot(dx, dy) < plateauR(map, Math.atan2(dy, dx)) - margin;
-}
-
-function makeMap(seed) {
-  const rnd = rng(seed);
-  const R = (a, b) => a + (b - a) * rnd();
-  const map = { size: MAP, hills: [], rocks: [], bushes: [], teleports: [] };
-  map.plateau = makePlateau(rnd);
-  const far = (list, x, y, r, gap) => list.every(o => Math.hypot(o.x - x, o.y - y) > o.r + r + gap);
-  for (let i = 0; i < 1500 && map.hills.length < 6; i++) {
-    const r = R(170, 250), x = R(r, MAP - r), y = R(r, MAP - r);
-    if (onPlateau(map, x, y, r + 90) && far(map.hills, x, y, r, 260)) map.hills.push({ x, y, r, p: r * 0.42 });
-  }
-  for (let i = 0; i < 6000 && map.rocks.length < 24; i++) {
-    const r = R(18, 42), x = R(60, MAP - 60), y = R(60, MAP - 60);
-    if (onPlateau(map, x, y, r + 60) && far(map.hills, x, y, r, 30) && far(map.rocks, x, y, r, 200)) map.rocks.push({ x, y, r });
-  }
-  const tpColor = '#9a6cff';
-  for (let i = 0; i < 20000 && map.teleports.length < 2; i++) {
-    const x = R(150, MAP - 150), y = R(150, MAP - 150);
-    if (!onPlateau(map, x, y, 160) || !far(map.hills, x, y, 20, 40) || !far(map.rocks, x, y, 20, 50)) continue;
-    if (map.teleports.length === 1 && Math.hypot(map.teleports[0].x - x, map.teleports[0].y - y) < 900) continue;
-    map.teleports.push({ x, y, r: 20, color: tpColor, pair: map.teleports.length ? 0 : 1 });
-  }
-  if (map.teleports.length < 2) map.teleports = [];
-  for (let i = 0; i < 9000 && map.bushes.length < 40; i++) {
-    const r = R(32, 48), x = R(80, MAP - 80), y = R(80, MAP - 80);
-    if (onPlateau(map, x, y, r + 50) && far(map.hills, x, y, r, 10) && far(map.rocks, x, y, r, 25) && far(map.bushes, x, y, r, 100) && far(map.teleports, x, y, r, 40)) {
-      map.bushes.push({ x, y, r, hp: BUSH_HP });
-    }
-  }
-  return map;
-}
-
-function freeSpot(map, r, flat, tries = 400, rnd = Math.random) {
-  for (let i = 0; i < tries; i++) {
-    const x = 80 + rnd() * (MAP - 160), y = 80 + rnd() * (MAP - 160);
-    if (rockAt(map, x, y, r + 6)) continue;
-    if (bushAt(map, x, y) >= 0) continue;
-    if (flat && heightAt(map, x, y) > 0) continue;
-    return { x, y };
-  }
-  return null;
-}
-
-// ================= Verbindungen, Freunde, Partys =================
 const conns = new Set();
-const byPid = new Map();     // pid -> conn
+const online = new Map();   // pid -> conn
 const parties = new Map();
-const matches = new Map();
-let queue = [];               // Party-IDs in der Warteschlange
+let queue = [];             // { party, mode, fill, since }
 let socialDirty = true;
 
 function send(c, o) { if (c && c.ws.readyState === 1) c.ws.send(JSON.stringify(o)); }
+const sendPid = (pid, o) => send(online.get(pid), o);
 function toast(c, msg) { send(c, { t: 'toast', msg }); }
+const rankIdx = (u) => CAT.rankInfo(u.rp).idx;
 
-function uniqueName(name, self) {
-  const taken = new Set([...byPid.values()].filter(c => c !== self).map(c => c.name.toLowerCase()));
-  let n = name, i = 2;
-  while (taken.has(n.toLowerCase())) n = name.slice(0, 13) + i++;
-  return n;
+// ================= Spiel-Engine =================
+const engine = createEngine({
+  send: sendPid,
+  onEnter() { socialDirty = true; },
+  onExit(pid) { sendPid(pid, { t: 'lobby' }); socialDirty = true; },
+  onResult(pid, r) {
+    const u = DB.get(pid);
+    if (!u) return;
+    const old = u.rp;
+    const rw = CAT.matchRewards({ place: r.place, teams: r.teams, kills: r.kills, rp: u.rp });
+    u.rp = rw.newRp; u.coins += rw.coins;
+    u.stats.games++; u.stats.kills += r.kills; if (r.win) u.stats.wins++;
+    DB.save(u);
+    const c = online.get(pid);
+    send(c, { t: 'result', ...r, oldRp: old, newRp: u.rp, drp: rw.drp, coins: rw.coins });
+    if (c) sendProfile(c);
+    socialDirty = true;
+  },
+});
+
+// ================= Konten =================
+function newUser(pid, name, legacy) {
+  const u = {
+    pid, name, created: Date.now(), last: Date.now(), rp: 0, coins: 150, owned: [],
+    equip: { ...CAT.DEFAULT_EQUIP }, ability: 'turbo', friends: [], requests: [], stats: { games: 0, wins: 0, kills: 0 }, cheats: {},
+  };
+  if (legacy && Number.isFinite(+legacy.rp)) u.rp = clamp(Math.round(+legacy.rp), 0, 1500);
+  if (legacy && CAT.canUse(u, legacy.skin)) u.equip.skin = legacy.skin;
+  return u;
+}
+function profilePayload(u) {
+  return { t: 'profile', pid: u.pid, name: u.name, rp: u.rp, coins: u.coins, owned: u.owned, equip: u.equip, ability: u.ability, stats: u.stats, cheats: u.cheats };
+}
+function sendProfile(c) { if (c && c.user) send(c, profilePayload(c.user)); }
+function activeMessages() {
+  const meta = DB.meta(), now = Date.now();
+  meta.messages = (meta.messages || []).filter(m => m.until > now);
+  return meta.messages;
+}
+function sendShop(c) {
+  const day = CAT.dayIndex();
+  send(c, { t: 'shop', day, items: CAT.shopForDay(day), nextIn: (day + 1) * 86400000 - Date.now() });
 }
 
+// ================= Party =================
 function newParty(c) {
-  const p = { id: uid('party'), leader: c.pid, members: [c.pid], queued: false, queueSince: 0 };
+  const p = { id: uid('party'), leader: c.pid, members: [c.pid], mode: 'solo', fill: true };
   parties.set(p.id, p);
-  c.party = p;
-  socialDirty = true;
+  c.party = p; socialDirty = true;
   return p;
 }
-function unqueue(p) {
-  if (p.queued) { p.queued = false; queue = queue.filter(id => id !== p.id); socialDirty = true; }
+function fitMode(p) { // Modus an Partygröße anpassen
+  const n = p.members.length;
+  if (MODES[p.mode].size < n) p.mode = n <= 2 ? 'duo' : 'squad';
 }
+function unqueue(p) { const before = queue.length; queue = queue.filter(q => q.party !== p); if (queue.length !== before) socialDirty = true; }
 function removeFromParty(c) {
   const p = c.party;
   if (!p) return;
@@ -221,33 +126,36 @@ function removeFromParty(c) {
   socialDirty = true;
 }
 function statusText(o) {
-  if (o.match) return 'Im Spiel';
-  if (o.party && o.party.queued) return 'Sucht Spiel';
+  if (engine.inMatch(o.pid)) return 'Im Spiel';
+  if (queue.some(q => q.party === o.party)) return 'Sucht Spiel';
   if (o.party && o.party.members.length > 1) return 'In Party';
   return 'Online';
 }
 function partyPayload(p) {
+  const q = queue.find(x => x.party === p);
   return {
-    t: 'party', id: p.id, leader: p.leader, queued: p.queued,
+    t: 'party', id: p.id, leader: p.leader, mode: p.mode, fill: p.fill, queued: !!q,
     members: p.members.map(pid => {
-      const o = byPid.get(pid);
-      return { pid, name: o ? o.name : '?', skin: o ? o.skin : 'rot', level: o ? o.level : 1, inMatch: !!(o && o.match) };
+      const u = DB.get(pid);
+      return { pid, name: u ? u.name : '?', equip: u ? u.equip : CAT.DEFAULT_EQUIP, level: u ? rankIdx(u) : 0, inMatch: engine.inMatch(pid) };
     }),
   };
 }
 function friendsPayload(c) {
+  const u = c.user;
   return {
     t: 'friends',
-    list: [...c.friends].map(([pid, name]) => {
-      const o = byPid.get(pid);
-      return { pid, name: o ? o.name : name, online: !!o, status: o ? statusText(o) : 'Offline', inMyParty: !!(o && o.party === c.party) };
+    list: u.friends.map(pid => DB.get(pid)).filter(Boolean).map(f => {
+      const o = online.get(f.pid);
+      return { pid: f.pid, name: f.name, online: !!o, status: o ? statusText(o) : 'Offline', level: rankIdx(f), inMyParty: !!(o && o.party === c.party) };
     }),
-    req: [...c.requests].map(([pid, name]) => ({ pid, name })),
+    req: u.requests.map(pid => DB.get(pid)).filter(Boolean).map(r => ({ pid: r.pid, name: r.name, level: rankIdx(r) })),
   };
 }
 function flushSocial() {
   socialDirty = false;
-  for (const c of byPid.values()) {
+  for (const c of online.values()) {
+    if (!c.party) continue;
     const pj = JSON.stringify(partyPayload(c.party));
     if (pj !== c.lastParty) { c.lastParty = pj; if (c.ws.readyState === 1) c.ws.send(pj); }
     const fj = JSON.stringify(friendsPayload(c));
@@ -255,739 +163,286 @@ function flushSocial() {
   }
 }
 function makeFriends(a, b) {
-  a.friends.set(b.pid, b.name); b.friends.set(a.pid, a.name);
-  a.requests.delete(b.pid); b.requests.delete(a.pid);
-  send(a, { t: 'friendAdded', pid: b.pid, name: b.name });
-  send(b, { t: 'friendAdded', pid: a.pid, name: a.name });
-  toast(a, `Du bist jetzt mit ${b.name} befreundet.`);
-  toast(b, `Du bist jetzt mit ${a.name} befreundet.`);
+  if (!a.friends.includes(b.pid)) a.friends.push(b.pid);
+  if (!b.friends.includes(a.pid)) b.friends.push(a.pid);
+  a.requests = a.requests.filter(x => x !== b.pid); b.requests = b.requests.filter(x => x !== a.pid);
+  DB.save(a); DB.save(b);
+  toast(online.get(a.pid), `Du bist jetzt mit ${b.name} befreundet.`);
+  toast(online.get(b.pid), `Du bist jetzt mit ${a.name} befreundet.`);
   socialDirty = true;
 }
 
-// Name schon vergeben? (Groß-/Kleinschreibung egal; das eigene alte Fenster zählt nicht)
-function nameTaken(name, pid) {
-  const n = name.toLowerCase();
-  return [...byPid.values()].some(o => o.pid !== pid && o.name.toLowerCase() === n);
-}
-
+// ================= Anmelden / Verbindung =================
 function login(c, msg) {
   if (c.pid || !validPid(msg.pid)) return;
-  const wanted = cleanName(msg.name);
-  if (nameTaken(wanted, msg.pid)) return send(c, { t: 'nameTaken', name: wanted, rename: false });
-  const old = byPid.get(msg.pid);
-  if (old) { send(old, { t: 'kicked' }); dropConn(old); try { old.ws.close(); } catch { /* egal */ } }
-  c.pid = msg.pid;
-  c.name = wanted;
-  c.skin = cleanSkin(msg.skin);
-  c.level = clamp(msg.level | 0, 0, 99);
-  c.friends = new Map();
-  c.requests = new Map();
-  if (Array.isArray(msg.friends)) {
-    for (const f of msg.friends.slice(0, 200)) if (f && validPid(f.pid) && f.pid !== c.pid) c.friends.set(f.pid, cleanName(f.name));
+  let u = DB.get(msg.pid);
+  if (!u) {
+    const name = cleanName(msg.name);
+    if (name.length < 2) return send(c, { t: 'nameTaken', name, rename: false, reason: 'Der Name ist zu kurz.' });
+    if (DB.nameTaken(name)) return send(c, { t: 'nameTaken', name, rename: false });
+    u = DB.create(newUser(msg.pid, name, msg.legacy));
   }
-  byPid.set(c.pid, c);
+  const old = online.get(u.pid);
+  if (old) { send(old, { t: 'kicked' }); dropConn(old); try { old.ws.close(); } catch { /* egal */ } }
+  c.pid = u.pid; c.user = u;
+  u.last = Date.now(); DB.save(u);
+  online.set(u.pid, c);
   newParty(c);
-  send(c, { t: 'welcome', pid: c.pid, name: c.name });
+  send(c, { t: 'welcome', pid: u.pid, name: u.name });
+  sendProfile(c); sendShop(c);
+  send(c, { t: 'messages', list: activeMessages() });
 }
-
 function dropConn(c) {
   if (!c.pid || c.dropped) return;
   c.dropped = true;
-  leaveMatch(c, true);
+  engine.leave(c.pid);
   removeFromParty(c);
-  if (byPid.get(c.pid) === c) byPid.delete(c.pid);
+  if (online.get(c.pid) === c) online.delete(c.pid);
+  if (c.user) { c.user.last = Date.now(); DB.save(c.user); }
+  socialDirty = true;
+}
+function deleteAccount(pid) {
+  const c = online.get(pid);
+  if (c) { send(c, { t: 'accountDeleted' }); dropConn(c); try { c.ws.close(); } catch { /* egal */ } }
+  DB.remove(pid);
   socialDirty = true;
 }
 
+// ================= Nachrichten vom Browser =================
 function handle(c, msg) {
   if (msg.t === 'login') return login(c, msg);
+  if (msg.t === 'adminLogin') return adminLogin(c, msg);
+  if (msg.t.startsWith('admin')) return c.admin ? admin(c, msg) : undefined;
   if (!c.pid || c.dropped) return;
-  const p = c.party;
+  const u = c.user, p = c.party;
   switch (msg.t) {
-    case 'profile':
-      c.skin = cleanSkin(msg.skin); c.level = clamp(msg.level | 0, 0, 99); socialDirty = true;
-      break;
     case 'rename': {
-      const wanted = cleanName(msg.name);
-      if (nameTaken(wanted, c.pid)) return send(c, { t: 'nameTaken', name: wanted, rename: true });
-      c.name = wanted;
-      send(c, { t: 'welcome', pid: c.pid, name: c.name }); socialDirty = true;
+      const name = cleanName(msg.name);
+      if (name.length < 2) return send(c, { t: 'nameTaken', name, rename: true, reason: 'Der Name ist zu kurz.' });
+      if (DB.nameTaken(name, u.pid)) return send(c, { t: 'nameTaken', name, rename: true });
+      DB.rename(u, name);
+      send(c, { t: 'welcome', pid: u.pid, name: u.name }); sendProfile(c); socialDirty = true;
+      break;
+    }
+    case 'equip': {
+      const it = CAT.ITEM_BY_ID[msg.id];
+      if (!it || !CAT.canUse(u, msg.id, u.cheats.allab)) return toast(c, 'Das hast du noch nicht freigeschaltet.');
+      u.equip[it.cat] = it.id; DB.save(u); sendProfile(c); socialDirty = true;
+      break;
+    }
+    case 'setAbility':
+      if (!CAT.canUseAbility(u, msg.id, u.cheats.allab)) return toast(c, 'Diese Fähigkeit ist noch gesperrt.');
+      u.ability = msg.id; DB.save(u); sendProfile(c);
+      break;
+    case 'buy': {
+      const it = CAT.ITEM_BY_ID[msg.id];
+      if (!it || !it.price || !CAT.shopForDay(CAT.dayIndex()).includes(it.id)) return toast(c, 'Dieses Angebot gibt es heute nicht.');
+      if (u.owned.includes(it.id)) return toast(c, 'Das gehört dir schon.');
+      if (u.coins < it.price) return toast(c, 'Dafür hast du nicht genug Zahnräder.');
+      u.coins -= it.price; u.owned.push(it.id); u.equip[it.cat] = it.id;
+      DB.save(u); sendProfile(c);
+      send(c, { t: 'bought', id: it.id });
       break;
     }
     case 'friendAdd': {
-      const name = cleanName(msg.name).toLowerCase();
-      const o = [...byPid.values()].find(x => x.name.toLowerCase() === name);
-      if (!o) return toast(c, 'Niemand mit diesem Namen ist gerade online.');
-      if (o === c) return toast(c, 'Das bist du selbst.');
-      if (c.friends.has(o.pid)) return toast(c, `${o.name} ist schon dein Freund.`);
-      if (c.requests.has(o.pid)) return makeFriends(c, o);
-      o.requests.set(c.pid, c.name);
-      toast(c, `Freundschaftsanfrage an ${o.name} gesendet.`);
-      toast(o, `${c.name} möchte dein Freund sein.`);
+      const o = DB.byName(cleanName(msg.name));
+      if (!o) return toast(c, 'Einen Spieler mit diesem Namen gibt es nicht.');
+      if (o.pid === u.pid) return toast(c, 'Das bist du selbst.');
+      if (u.friends.includes(o.pid)) return toast(c, `${o.name} ist schon dein Freund.`);
+      if (u.requests.includes(o.pid)) return makeFriends(u, o);
+      if (o.requests.includes(u.pid)) return toast(c, `Du hast ${o.name} schon eine Anfrage geschickt.`);
+      o.requests.push(u.pid); DB.save(o);
+      toast(c, online.has(o.pid) ? `Freundschaftsanfrage an ${o.name} gesendet.` : `${o.name} ist offline – die Anfrage wartet auf ${o.name}.`);
+      toast(online.get(o.pid), `${u.name} möchte dein Freund sein.`);
       socialDirty = true;
       break;
     }
     case 'friendAccept': {
-      if (!c.requests.has(msg.pid)) return;
-      const o = byPid.get(msg.pid);
-      c.requests.delete(msg.pid); socialDirty = true;
-      if (!o) return toast(c, 'Der Spieler ist nicht mehr online.');
-      makeFriends(c, o);
+      const o = DB.get(msg.pid);
+      if (!o || !u.requests.includes(o.pid)) return;
+      makeFriends(u, o);
       break;
     }
     case 'friendDecline':
-      c.requests.delete(msg.pid); socialDirty = true;
+      u.requests = u.requests.filter(x => x !== msg.pid); DB.save(u); socialDirty = true;
       break;
     case 'friendRemove': {
-      c.friends.delete(msg.pid);
-      send(c, { t: 'friendRemoved', pid: msg.pid });
-      const o = byPid.get(msg.pid);
-      if (o) { o.friends.delete(c.pid); send(o, { t: 'friendRemoved', pid: c.pid }); }
+      u.friends = u.friends.filter(x => x !== msg.pid); DB.save(u);
+      const o = DB.get(msg.pid);
+      if (o) { o.friends = o.friends.filter(x => x !== u.pid); DB.save(o); }
       socialDirty = true;
       break;
     }
     case 'invite': {
-      const o = byPid.get(msg.pid);
-      if (!o || !c.friends.has(o.pid) || p.members.includes(o.pid)) return;
+      const o = online.get(msg.pid);
+      if (!o || !u.friends.includes(msg.pid) || p.members.includes(msg.pid)) return;
       if (p.members.length >= PARTY_MAX) return toast(c, 'Deine Party ist voll.');
-      if (o.match) return toast(c, `${o.name} ist gerade im Spiel.`);
-      send(o, { t: 'invite', partyId: p.id, from: c.name, fromPid: c.pid });
-      toast(c, `Einladung an ${o.name} gesendet.`);
+      if (engine.inMatch(o.pid)) return toast(c, `${o.user.name} ist gerade im Spiel.`);
+      send(o, { t: 'invite', partyId: p.id, from: u.name, fromPid: u.pid });
+      toast(c, `Einladung an ${o.user.name} gesendet.`);
       break;
     }
     case 'inviteAccept': {
       const np = parties.get(msg.partyId);
       if (!np) return toast(c, 'Diese Party gibt es nicht mehr.');
-      if (np === p || c.match) return;
+      if (np === p || engine.inMatch(c.pid)) return;
       if (np.members.length >= PARTY_MAX) return toast(c, 'Die Party ist schon voll.');
       removeFromParty(c);
-      np.members.push(c.pid); c.party = np; unqueue(np);
-      for (const pid of np.members) { const o = byPid.get(pid); if (o && o !== c) toast(o, `${c.name} ist der Party beigetreten.`); }
+      np.members.push(c.pid); c.party = np; unqueue(np); fitMode(np);
+      for (const pid of np.members) if (pid !== c.pid) toast(online.get(pid), `${u.name} ist der Party beigetreten.`);
       socialDirty = true;
       break;
     }
-    case 'inviteDecline': {
-      const o = byPid.get(msg.fromPid);
-      if (o) toast(o, `${c.name} hat die Einladung abgelehnt.`);
-      break;
-    }
+    case 'inviteDecline': toast(online.get(msg.fromPid), `${u.name} hat die Einladung abgelehnt.`); break;
     case 'partyLeave':
       if (p.members.length <= 1) return;
       removeFromParty(c); newParty(c);
       break;
     case 'kick': {
       if (p.leader !== c.pid || msg.pid === c.pid || !p.members.includes(msg.pid)) return;
-      const o = byPid.get(msg.pid);
+      const o = online.get(msg.pid);
       if (o) { removeFromParty(o); newParty(o); toast(o, 'Du wurdest aus der Party entfernt.'); }
       break;
     }
+    case 'setMode':
+      if (p.leader !== c.pid || queue.some(q => q.party === p)) return;
+      if (MODES[msg.mode]) {
+        if (MODES[msg.mode].size < p.members.length) return toast(c, `Für ${MODES[msg.mode].name} ist deine Party zu groß.`);
+        p.mode = msg.mode;
+      }
+      if (typeof msg.fill === 'boolean') p.fill = msg.fill;
+      socialDirty = true;
+      break;
     case 'play': {
-      if (p.leader !== c.pid || p.queued || c.match) return;
-      const busy = p.members.map(pid => byPid.get(pid)).filter(o => o && o.match);
-      if (busy.length) return toast(c, `Warte, bis ${busy.map(o => o.name).join(', ')} zurück ist.`);
-      p.queued = true; p.queueSince = nowS(); queue.push(p.id); socialDirty = true;
+      if (p.leader !== c.pid || queue.some(q => q.party === p) || engine.inMatch(c.pid)) return;
+      const busy = p.members.filter(pid => engine.inMatch(pid)).map(pid => DB.get(pid).name);
+      if (busy.length) return toast(c, `Warte, bis ${busy.join(', ')} zurück ist.`);
+      if (MODES[p.mode].size < p.members.length) return toast(c, 'Deine Party ist zu groß für diesen Modus.');
+      queue.push({ party: p, mode: p.mode, fill: p.fill, since: nowS() });
+      socialDirty = true;
       break;
     }
-    case 'cancel':
-      if (p.leader === c.pid) unqueue(p);
-      break;
-    case 'input': {
-      const m = c.match; if (!m) return;
-      const t = m.byId.get(c.pid); if (!t || !t.alive) return;
-      t.input = {
-        dx: clamp(+msg.dx || 0, -1, 1), dy: clamp(+msg.dy || 0, -1, 1),
-        aim: Number.isFinite(+msg.aim) ? +msg.aim : t.ta, fire: !!msg.fire, block: !!msg.block,
-      };
-      break;
-    }
-    case 'spectate': {
-      const m = c.match; if (!m) return;
-      const me = m.byId.get(c.pid); if (!me || me.alive) return;
-      const alive = m.tanks.filter(t => t.alive);
-      if (!alive.length) return;
-      alive.sort((a, b) => (a.team === me.team ? 0 : 1) - (b.team === me.team ? 0 : 1));
-      const i = alive.findIndex(t => t.id === c.focusId);
-      c.focusId = alive[(i + 1) % alive.length].id;
-      break;
-    }
-    case 'toLobby':
-      leaveMatch(c, false);
-      break;
-    case 'deleteAccount': {
-      // Freunde informieren, Anfragen entfernen, Verbindung trennen -> Name ist sofort wieder frei
-      for (const [pid] of c.friends) {
-        const o = byPid.get(pid);
-        if (o) { o.friends.delete(c.pid); send(o, { t: 'friendRemoved', pid: c.pid }); }
-      }
-      for (const o of byPid.values()) o.requests.delete(c.pid);
-      dropConn(c);
-      try { c.ws.close(); } catch { /* egal */ }
-      break;
-    }
+    case 'cancel': if (p.leader === c.pid) unqueue(p); break;
+    case 'input': engine.input(c.pid, msg); break;
+    case 'spectate': engine.spectate(c.pid); break;
+    case 'toLobby': engine.leave(c.pid); break;
+    case 'deleteAccount': deleteAccount(c.pid); break;
   }
 }
 
-// ================= Matchmaking =================
+// ================= Matchmaking (echte Spieler zuerst, dann Bots) =================
+const player = (pid) => { const u = DB.get(pid); return { id: pid, name: u.name, equip: u.equip, ability: u.ability, cheats: u.cheats || {} }; };
 function matchmake(now) {
-  queue = queue.filter(id => { const p = parties.get(id); return p && p.queued; });
-  if (!queue.length) return;
-  const first = parties.get(queue[0]);
-  const humans = queue.reduce((s, id) => s + parties.get(id).members.length, 0);
-  if (now - first.queueSince < 5 && humans < 8) return; // kurz auf weitere Partys warten
-  const chosen = [];
-  let n = 0;
-  for (const id of queue) {
-    const p = parties.get(id);
-    if (n + p.members.length > 8) break;
-    chosen.push(p); n += p.members.length;
-  }
-  for (const p of chosen) unqueue(p);
-  createMatch(chosen, now);
-}
-
-// ================= Match =================
-function newAI() {
-  return { target: null, seenT: 0, senseT: 0, lastSeen: null, side: 1, sideT: 0, noise: 0, noiseT: 0, wx: 0, wy: 0, wT: 0, hide: -1, provoked: false };
-}
-function makeTank(id, name, team, skin, bot) {
-  return {
-    id, name, team, skin, bot, x: 0, y: 0, a: 0, ta: 0, h: 0, vx: 0, vy: 0,
-    hp: MAX_HP, alive: true, kills: 0, dmg: 0,
-    ph: 'bus', dropT0: 0, landedAt: 0, jumpAt: 0, goal: null, lastHurt: 0,
-    revealUntil: 0, nextFire: 0, tpLock: -1, blockUntil: 0, blockReady: 0,
-    input: { dx: 0, dy: 0, aim: 0, fire: false, block: false }, ai: bot ? newAI() : null,
-    place: 0, resultSent: false, killerId: null,
-  };
-}
-
-// Flugroute des Kampfbusses: quer über die Karte, nicht genau durch die Mitte
-function makeBusRoute(map) {
-  // Gerade quer über die Kuppe; Anfang und Ende liegen sicher über festem Boden
-  const a = Math.random() * Math.PI * 2, P = map.plateau;
-  const off = (Math.random() - 0.5) * MAP * 0.18;
-  const cx = P.cx + Math.cos(a + Math.PI / 2) * off, cy = P.cy + Math.sin(a + Math.PI / 2) * off;
-  const dx = Math.cos(a), dy = Math.sin(a);
-  const end = (sgn) => { let t = 0; while (t < MAP && onPlateau(map, cx + sgn * dx * (t + 10), cy + sgn * dy * (t + 10), 160)) t += 10; return t; };
-  const t0 = end(-1), t1 = end(1);
-  return { x0: cx - dx * t0, y0: cy - dy * t0, x1: cx + dx * t1, y1: cy + dy * t1, a };
-}
-function busPos(m, now) {
-  const k = clamp((now - m.busStart) / m.busDur, 0, 1), r = m.bus;
-  return { x: lerp(r.x0, r.x1, k), y: lerp(r.y0, r.y1, k), k };
-}
-
-function createMatch(chosen, now) {
-  const seed = Math.floor(Math.random() * 1e9);
-  const map = makeMap(seed);
-  const teamSize = Math.max(...chosen.map(p => p.members.length));
-  const total = teamSize === 3 ? 9 : 8;
-  const busDur = BUS_DUR * (FAST < 1 ? 0.4 : 1);
-  const m = {
-    id: uid('m'), map, tanks: [], byId: new Map(), bullets: [], events: [],
-    humans: new Set(), humanList: [], over: false, endAt: 0, teamCount: 0, lastTick: now,
-    bus: makeBusRoute(map), busStart: now + BUS_WAIT, busDur,
-  };
-  m.busEnd = m.busStart + busDur;
-  const names = BOT_NAMES.slice().sort(() => Math.random() - 0.5);
-  let botN = 0;
-  const addBot = (team) => {
-    m.tanks.push(makeTank('bot' + uid(''), names[botN++ % names.length], team, BOT_SKINS[Math.floor(Math.random() * BOT_SKINS.length)], true));
-  };
-  let team = 0;
-  for (const p of chosen) {
-    let size = 0;
-    for (const pid of p.members) {
-      const c = byPid.get(pid);
-      if (!c || c.match) continue;
-      m.tanks.push(makeTank(c.pid, c.name, team, c.skin, false));
-      m.humans.add(c.pid); m.humanList.push({ pid: c.pid, name: c.name });
-      c.match = m; c.focusId = c.pid;
-      size++;
+  queue = queue.filter(q => parties.has(q.party.id) && q.party.members.every(pid => online.has(pid)));
+  for (const mode of Object.keys(MODES)) {
+    const M = MODES[mode];
+    const entries = queue.filter(q => q.mode === mode);
+    if (!entries.length) continue;
+    const humans = entries.reduce((s, q) => s + q.party.members.length, 0);
+    if (humans < M.total && now - entries[0].since < MM_WAIT) continue;
+    const chosen = [];
+    let n = 0;
+    for (const q of entries) { if (n + q.party.members.length > M.total) break; chosen.push(q); n += q.party.members.length; }
+    queue = queue.filter(q => !chosen.includes(q));
+    // Teams bilden: "Auffüllen" bringt einzelne Spieler mit anderen zusammen
+    const teams = [], pool = [];
+    for (const q of chosen) {
+      if (q.fill && q.party.members.length < M.size) pool.push(...q.party.members);
+      else teams.push({ list: q.party.members.map(player), fill: q.fill });
     }
-    while (size < teamSize) { addBot(team); size++; }
-    team++;
-  }
-  while (m.tanks.length < total) {
-    for (let k = 0; k < teamSize && m.tanks.length < total; k++) addBot(team);
-    team++;
-  }
-  m.teamCount = team;
-  for (const t of m.tanks) {
-    m.byId.set(t.id, t);
-    t.x = m.bus.x0; t.y = m.bus.y0; t.a = t.ta = m.bus.a;
-    if (t.bot) t.jumpAt = m.busStart + busDur * (0.08 + Math.random() * 0.84);
-  }
-  // Sturm: bedeckt am Anfang die ganze Karte, startet nach dem Bus
-  m.zone = { x: MAP / 2, y: MAP / 2, r: MAP * 0.58, tx: 0, ty: 0, tr: 0, phase: 0, stage: 'wait', until: m.busEnd + ZONE_PHASES[0].wait, fx: 0, fy: 0, fr: 0, s0: 0 };
-  setZoneTarget(m.zone, 0, map);
-  matches.set(m.id, m);
-  const mapPayload = { size: MAP, plateau: map.plateau, hills: map.hills, rocks: map.rocks, bushes: map.bushes.map(b => ({ x: b.x, y: b.y, r: b.r, hp: b.hp })), teleports: map.teleports };
-  const roster = m.tanks.map(t => ({ id: t.id, name: t.name, team: t.team, skin: t.skin, bot: t.bot }));
-  for (const pid of m.humans) {
-    const c = byPid.get(pid), me = m.byId.get(pid);
-    send(c, { t: 'matchStart', map: mapPayload, roster, myTeam: me.team, teams: m.teamCount, total: m.tanks.length, maxHp: MAX_HP, bus: m.bus, busDur, blockCd: BLOCK_CD + BLOCK_TIME });
-  }
-  socialDirty = true;
-}
-
-function setZoneTarget(z, phase, map) {
-  const nr = ZONE_PHASES[phase].r, P = map.plateau;
-  const maxOff = Math.max(0, z.r - nr) * 0.7;
-  const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * maxOff;
-  let tx = z.x + Math.cos(a) * d, ty = z.y + Math.sin(a) * d;
-  // Mitte des nächsten Kreises muss gut auf der Kuppe liegen
-  const ang = Math.atan2(ty - P.cy, tx - P.cx), lim = Math.max(0, plateauR(map, ang) * 0.85 - nr * 0.6);
-  const dd = Math.hypot(tx - P.cx, ty - P.cy);
-  if (dd > lim) { tx = P.cx + Math.cos(ang) * lim; ty = P.cy + Math.sin(ang) * lim; }
-  z.tx = tx; z.ty = ty; z.tr = nr;
-}
-function updateZone(m, now) {
-  const z = m.zone;
-  if (z.stage === 'done') return;
-  const ph = ZONE_PHASES[z.phase];
-  if (z.stage === 'wait' && now >= z.until) {
-    z.stage = 'shrink'; z.fx = z.x; z.fy = z.y; z.fr = z.r; z.s0 = now; z.until = now + ph.shrink;
-    m.events.push({ k: 'zone', g: 1 });
-  }
-  if (z.stage === 'shrink') {
-    const k = clamp((now - z.s0) / ph.shrink, 0, 1);
-    z.x = lerp(z.fx, z.tx, k); z.y = lerp(z.fy, z.ty, k); z.r = lerp(z.fr, z.tr, k);
-    if (k >= 1) {
-      z.phase++;
-      if (z.phase < ZONE_PHASES.length) { z.stage = 'wait'; z.until = now + ZONE_PHASES[z.phase].wait; setZoneTarget(z, z.phase, m.map); }
-      else { z.stage = 'done'; z.until = now; }
+    for (let i = 0; i < pool.length; i += M.size) teams.push({ list: pool.slice(i, i + M.size).map(player), fill: true });
+    for (const t of teams) while (t.fill && t.list.length < M.size) t.list.push(null); // Lücken mit Bots
+    let count = teams.reduce((s, t) => s + t.list.length, 0);
+    while (count < M.total) {
+      const team = [];
+      for (let k = 0; k < M.size && count < M.total; k++) { team.push(null); count++; }
+      teams.push({ list: team });
     }
+    engine.createMatch(teams.map(t => t.list), mode);
+    socialDirty = true;
   }
-}
-const zoneDps = (z) => (z.stage === 'done' ? 20 : ZONE_PHASES[Math.min(z.phase, ZONE_PHASES.length - 1)].dps);
-
-function collide(map, t) {
-  t.x = clamp(t.x, TR, MAP - TR); t.y = clamp(t.y, TR, MAP - TR);
-  for (const k of map.rocks) {
-    const dx = t.x - k.x, dy = t.y - k.y, d = Math.hypot(dx, dy), min = k.r + TR;
-    if (d < min && d > 0.001) { t.x = k.x + dx / d * min; t.y = k.y + dy / d * min; }
-  }
-}
-
-// ---------- Bus & Fallschirm ----------
-function jump(m, t, now) {
-  const p = busPos(m, now);
-  t.ph = 'drop'; t.dropT0 = now; t.x = clamp(p.x, 40, MAP - 40); t.y = clamp(p.y, 40, MAP - 40);
-  if (t.bot) {
-    const a = Math.random() * Math.PI * 2, d = Math.random() * 520;
-    let gx = t.x + Math.cos(a) * d, gy = t.y + Math.sin(a) * d;
-    for (let k = 0; k < 20 && !onPlateau(m.map, gx, gy, 150); k++) { gx = (gx + m.map.plateau.cx) / 2; gy = (gy + m.map.plateau.cy) / 2; }
-    t.goal = { x: gx, y: gy };
-  }
-  m.events.push({ k: 'jump', x: t.x, y: t.y, i: t.id });
-}
-function updateAir(m, t, now, dt) {
-  if (t.ph === 'bus') {
-    if (now < m.busStart) return;
-    const p = busPos(m, now);
-    t.x = p.x; t.y = p.y; t.a = t.ta = m.bus.a;
-    const wants = t.bot ? now >= t.jumpAt : t.input.fire;
-    if (wants || now >= m.busEnd) jump(m, t, now);
-    return;
-  }
-  // Fallschirm: frei steuern, dann landen
-  let dx = t.input.dx, dy = t.input.dy;
-  if (t.bot && t.goal) { dx = t.goal.x - t.x; dy = t.goal.y - t.y; if (Math.hypot(dx, dy) < 12) dx = dy = 0; }
-  const L = Math.hypot(dx, dy);
-  if (L > 0.05) { t.x += dx / L * DROP_SPEED * dt; t.y += dy / L * DROP_SPEED * dt; t.a = turnTo(t.a, Math.atan2(dy, dx), dt * 6); }
-  t.x = clamp(t.x, TR, MAP - TR); t.y = clamp(t.y, TR, MAP - TR);
-  t.ta = t.bot ? t.a : turnTo(t.ta, t.input.aim, dt * 40);
-  if (now - t.dropT0 >= DROP_TIME) {
-    t.ph = 'ground'; t.landedAt = now; t.lastHurt = now;
-    if (!onPlateau(m.map, t.x, t.y)) { fall(m, t, now); return; }
-    collide(m.map, t);
-    t.h = heightAt(m.map, t.x, t.y);
-    m.events.push({ k: 'land', x: t.x, y: t.y, i: t.id });
+  // Suchstatus an alle Wartenden
+  for (const q of queue) {
+    const M = MODES[q.mode];
+    const found = queue.filter(x => x.mode === q.mode).reduce((s, x) => s + x.party.members.length, 0);
+    for (const pid of q.party.members) sendPid(pid, { t: 'queue', found, total: M.total, wait: Math.floor(now - q.since), max: MM_WAIT });
   }
 }
 
-function fall(m, t, now) {
-  m.events.push({ k: 'fall', x: t.x, y: t.y, a: t.a, i: t.id });
-  eliminate(m, t, null, 'fall', now);
+// ================= Admin =================
+const adminTries = new Map(); // ip -> {n, until}
+function adminLogin(c, msg) {
+  const t = adminTries.get(c.ip) || { n: 0, until: 0 };
+  if (Date.now() < t.until) return send(c, { t: 'adminFail', msg: 'Zu viele Versuche. Bitte kurz warten.' });
+  if (String(msg.user || '').trim().toLowerCase() === ADMIN_USER && String(msg.pass || '') === ADMIN_PASS) {
+    c.admin = true; adminTries.delete(c.ip);
+    send(c, { t: 'adminOk' }); admin(c, { t: 'adminList' });
+  } else {
+    t.n++; if (t.n >= 5) { t.until = Date.now() + 60000; t.n = 0; }
+    adminTries.set(c.ip, t);
+    send(c, { t: 'adminFail', msg: 'Benutzer oder Passwort falsch.' });
+  }
 }
-
-function moveTank(m, t, now, dt) {
-  const map = m.map, inp = t.input;
-  const px = t.x, py = t.y;
-  if (inp.block && now >= t.blockReady) {
-    t.blockUntil = now + BLOCK_TIME; t.blockReady = now + BLOCK_TIME + BLOCK_CD;
-    m.events.push({ k: 'blockOn', x: t.x, y: t.y, i: t.id });
-  }
-  const blocking = now < t.blockUntil;
-  const L = Math.hypot(inp.dx, inp.dy);
-  if (L > 0.05) {
-    const dx = inp.dx / L, dy = inp.dy / L;
-    const h0 = heightAt(map, t.x, t.y), h1 = heightAt(map, t.x + dx * 6, t.y + dy * 6);
-    const s = clamp((h1 - h0) / 6 * SLOPE_W, -1, 1);
-    const f = s > 0 ? 1 - 0.55 * s : 1 - 0.3 * s; // bergauf langsamer, bergab schneller
-    const sp = SPEED * (blocking ? 0.6 : 1) * f;
-    t.a = turnTo(t.a, Math.atan2(dy, dx), dt * 10);
-    t.x += dx * sp * dt; t.y += dy * sp * dt;
-    collide(map, t);
-    if (!onPlateau(map, t.x, t.y)) { fall(m, t, now); return; }
-  }
-  t.ta = turnTo(t.ta, inp.aim, dt * (t.bot ? 6 : 40));
-
-  const tps = map.teleports;
-  for (let i = 0; i < tps.length; i++) {
-    const tp = tps[i], d = Math.hypot(t.x - tp.x, t.y - tp.y);
-    if (t.tpLock === i && d > tp.r + TR) t.tpLock = -1;
-    else if (t.tpLock !== i && d < tp.r) {
-      const dst = tps[tp.pair];
-      m.events.push({ k: 'tp', x: t.x, y: t.y });
-      t.x = dst.x; t.y = dst.y; t.tpLock = tp.pair;
-      m.events.push({ k: 'tp', x: dst.x, y: dst.y });
+function admin(c, msg) {
+  const target = msg.pid ? DB.get(msg.pid) : null;
+  const touched = (u) => { DB.save(u); sendProfile(online.get(u.pid)); socialDirty = true; };
+  switch (msg.t) {
+    case 'adminList': break;
+    case 'adminDelete': if (target) deleteAccount(target.pid); break;
+    case 'adminDeleteAll': for (const u of DB.all()) if (u.pid !== c.pid) deleteAccount(u.pid); break;
+    case 'adminCoins': {
+      const amt = clamp(Math.round(+msg.amount || 0), -1e6, 1e6);
+      const list = msg.pid === '*' ? DB.all() : target ? [target] : [];
+      for (const u of list) { u.coins = Math.max(0, u.coins + amt); touched(u); if (amt > 0) toast(online.get(u.pid), `Du hast ${amt} Zahnräder geschenkt bekommen!`); }
       break;
     }
-  }
-  t.vx = (t.x - px) / dt; t.vy = (t.y - py) / dt;
-  t.h = heightAt(map, t.x, t.y);
-
-  // langsame Selbstreparatur, wenn länger kein Schaden (nicht im Sturm)
-  const z = m.zone;
-  if (t.hp < MAX_HP && now - t.lastHurt > REGEN_DELAY && Math.hypot(t.x - z.x, t.y - z.y) < z.r) t.hp = Math.min(MAX_HP, t.hp + REGEN * dt);
-
-  if (inp.fire && now >= t.nextFire && !blocking) {
-    t.nextFire = now + FIRE_CD;
-    t.revealUntil = now + REVEAL;
-    const c = Math.cos(t.ta), s = Math.sin(t.ta), ob = bushAt(map, t.x, t.y);
-    m.bullets.push({ id: (bulletId = (bulletId + 1) % 1e6), x: t.x + c * (TR + 10), y: t.y + s * (TR + 10), vx: c * BSPEED, vy: s * BSPEED, a: t.ta, owner: t.id, team: t.team, h: t.h, dmg: DMG, life: BLIFE, bush: ob });
-    m.events.push({ k: 'shot', x: t.x + c * (TR + 12), y: t.y + s * (TR + 12), a: t.ta, i: t.id });
-  }
-}
-
-let bulletId = 0;
-function updateBullets(m, now, dt) {
-  const map = m.map;
-  for (const b of m.bullets) {
-    b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
-    if (b.life <= 0 || b.x < 0 || b.y < 0 || b.x > MAP || b.y > MAP) { b.dead = true; continue; }
-    let hit = false;
-    for (const k of map.rocks) {
-      if (Math.hypot(b.x - k.x, b.y - k.y) < k.r + BR) { m.events.push({ k: 'puff', x: b.x, y: b.y }); hit = true; break; }
+    case 'adminRp': if (target) { target.rp = clamp(Math.round(+msg.rp || 0), 0, 99999); touched(target); } break;
+    case 'adminCheats': if (target) {
+      const ch = {};
+      for (const k of ['god', 'nocd', 'speed', 'oneshot', 'wall', 'allab']) if (msg.cheats && msg.cheats[k]) ch[k] = true;
+      target.cheats = ch; touched(target);
+    } break;
+    case 'adminMsg': {
+      const text = String(msg.text || '').replace(/[<>]/g, '').trim().slice(0, 200);
+      const minutes = clamp(+msg.minutes || 10, 1, 60 * 24 * 30);
+      if (text) { DB.meta().messages.push({ id: uid('msg'), text, until: Date.now() + minutes * 60000 }); DB.saveMeta(); broadcastMessages(); }
+      break;
     }
-    if (!hit && heightAt(map, b.x, b.y) > b.h + HILL_BLOCK) { m.events.push({ k: 'dirt', x: b.x, y: b.y }); hit = true; }
-    if (!hit) {
-      for (let i = 0; i < map.bushes.length; i++) {
-        const bu = map.bushes[i];
-        if (i === b.bush || bu.hp <= 0) continue;
-        if (Math.hypot(b.x - bu.x, b.y - bu.y) < bu.r) {
-          bu.hp = 0;
-          m.events.push({ k: 'bush', g: 1, i, hp: 0, x: bu.x, y: bu.y });
-          hit = true; break;
-        }
-      }
-    }
-    if (!hit) {
-      for (const t of m.tanks) {
-        if (!t.alive || t.ph !== 'ground' || t.team === b.team) continue;
-        if (Math.hypot(t.x - b.x, t.y - b.y) < HIT_R + BR) {
-          if (now < t.blockUntil) m.events.push({ k: 'block', x: b.x, y: b.y, v: t.id, by: b.owner });
-          else damage(m, t, b, now);
-          hit = true; break;
-        }
-      }
-    }
-    if (hit) b.dead = true;
+    case 'adminMsgDel': DB.meta().messages = activeMessages().filter(m => m.id !== msg.id); DB.saveMeta(); broadcastMessages(); break;
+    default: return;
   }
-  m.bullets = m.bullets.filter(b => !b.dead);
+  const users = DB.all().sort((a, b) => (online.has(b.pid) - online.has(a.pid)) || b.last - a.last).map(u => ({
+    pid: u.pid, name: u.name, rp: u.rp, rank: rankIdx(u), coins: u.coins, online: online.has(u.pid), inMatch: engine.inMatch(u.pid),
+    last: u.last, stats: u.stats, cheats: u.cheats || {},
+  }));
+  send(c, { t: 'adminData', users, messages: activeMessages(), stats: { online: online.size, matches: engine.count(), queue: queue.length, db: DB.mode, accounts: users.length } });
 }
-
-function damage(m, t, b, now) {
-  const att = m.byId.get(b.owner);
-  const d = Math.min(t.hp, b.dmg);
-  t.hp -= b.dmg; t.lastHurt = now;
-  if (att) att.dmg += d;
-  m.events.push({ k: 'hit', x: t.x, y: t.y, d: b.dmg, v: t.id, by: b.owner });
-  if (t.bot && att) { t.ai.lastSeen = { x: att.x, y: att.y, t: now }; t.ai.senseT = 0; t.ai.provoked = true; }
-  if (t.hp <= 0) eliminate(m, t, att, 'kill', now);
-}
-
-function eliminate(m, t, killer, cause, now) {
-  if (!t.alive) return;
-  t.alive = false; t.hp = 0; t.killerId = killer ? killer.id : null;
-  if (t.ph === 'ground' && cause !== 'fall') m.events.push({ k: 'boom', x: t.x, y: t.y });
-  let text;
-  if (killer && killer !== t) {
-    killer.kills++; text = `${killer.name} hat ${t.name} eliminiert`;
-    if (killer.alive) { const before = killer.hp; killer.hp = Math.min(MAX_HP, killer.hp + KILL_HEAL); m.events.push({ k: 'heal', x: killer.x, y: killer.y, i: killer.id, d: Math.round(killer.hp - before) }); }
-  }
-  else if (cause === 'zone') text = `${t.name} wurde vom Sturm erwischt`;
-  else if (cause === 'fall') text = `${t.name} ist in den Abgrund gestürzt`;
-  else text = `${t.name} hat das Spiel verlassen`;
-  m.events.push({ k: 'feed', g: 1, text, by: killer ? killer.id : null, v: t.id });
-  if (killer) m.events.push({ k: 'elim', g: 1, by: killer.id, v: t.id, vn: t.name });
-  const teamsAliveNow = new Set(m.tanks.filter(o => o.alive).map(o => o.team)).size;
-  if (!t.bot) {
-    const c = byPid.get(t.id);
-    if (c && c.match === m) send(c, { t: 'dead', by: killer ? killer.name : null, cause, place: teamsAliveNow + 1 });
-  }
-  if (!m.tanks.some(o => o.team === t.team && o.alive)) {
-    for (const o of m.tanks) if (o.team === t.team) sendResult(m, o, teamsAliveNow + 1, false);
-  }
-  checkEnd(m, now);
-}
-
-function sendResult(m, t, place, win) {
-  if (t.resultSent) return;
-  t.resultSent = true; t.place = place;
-  if (t.bot) return;
-  const c = byPid.get(t.id);
-  if (!c) return;
-  send(c, {
-    t: 'result', place, teams: m.teamCount, kills: t.kills, dmg: Math.round(t.dmg), win,
-    players: m.humanList.filter(p => p.pid !== t.id), inMatch: c.match === m,
-  });
-}
-
-function checkEnd(m, now) {
-  if (m.over) return;
-  const teams = new Set(m.tanks.filter(o => o.alive).map(o => o.team));
-  if (teams.size > 1) return;
-  m.over = true; m.endAt = now + 10;
-  for (const o of m.tanks) if (teams.has(o.team)) sendResult(m, o, 1, true);
-  const winner = m.tanks.find(o => teams.has(o.team));
-  m.events.push({ k: 'over', g: 1, team: winner ? winner.team : -1 });
-}
-
-function leaveMatch(c, disconnect) {
-  const m = c.match;
-  if (!m) return;
-  c.match = null;
-  m.humans.delete(c.pid);
-  const t = m.byId.get(c.pid);
-  if (t && t.alive && !m.over) eliminate(m, t, null, 'left', nowS());
-  if (!m.humans.size) matches.delete(m.id);
-  if (!disconnect) send(c, { t: 'lobby' });
-  socialDirty = true;
-}
-
-// ---------- Bots ----------
-function hiddenFrom(map, t, viewer, now) {
-  if (t.team === viewer.team || now < t.revealUntil || t.ph !== 'ground') return false;
-  if (bushAt(map, t.x, t.y) < 0) return false;
-  return dist(t, viewer) > 75;
-}
-function shotClear(map, a, b, h) {
-  const d = Math.hypot(b.x - a.x, b.y - a.y), steps = Math.ceil(d / 18);
-  const own = bushAt(map, a.x, a.y), targetBush = bushAt(map, b.x, b.y);
-  for (let i = 1; i < steps; i++) {
-    const x = a.x + (b.x - a.x) * i / steps, y = a.y + (b.y - a.y) * i / steps;
-    if (rockAt(map, x, y, BR)) return false;
-    if (heightAt(map, x, y) > h + HILL_BLOCK) return false;
-    const bi = bushAt(map, x, y);
-    if (bi >= 0 && bi !== own && bi !== targetBush) return false;
-  }
-  return true;
-}
-function blockedAt(map, x, y) {
-  return !onPlateau(map, x, y, 60) || x < TR + 10 || y < TR + 10 || x > MAP - TR - 10 || y > MAP - TR - 10 || rockAt(map, x, y, TR + 6);
-}
-
-function botThink(m, t, now, dt) {
-  const ai = t.ai, map = m.map, z = m.zone;
-  ai.senseT -= dt; ai.sideT -= dt; ai.noiseT -= dt; ai.wT -= dt;
-  if (ai.noiseT <= 0) { ai.noiseT = 0.6; ai.noise = (Math.random() - 0.5) * 0.24; }
-  if (ai.sideT <= 0) { ai.sideT = 1 + Math.random() * 1.6; ai.side = Math.random() < 0.5 ? -1 : 1; }
-  if (ai.senseT <= 0) {
-    ai.senseT = 0.25;
-    let best = null, bs = Infinity;
-    const calm = now < t.landedAt + 8 && !ai.provoked; // kurz nach der Landung erst umschauen
-    for (const o of m.tanks) {
-      if (calm || !o.alive || o.ph !== 'ground' || o.team === t.team) continue;
-      const d = dist(o, t);
-      if (d > 560 || hiddenFrom(map, o, t, now)) continue;
-      const score = d + o.hp * 1.5;
-      if (score < bs) { bs = score; best = o; }
-    }
-    if (best !== ai.target) ai.seenT = 0;
-    ai.target = best;
-    if (best) ai.lastSeen = { x: best.x, y: best.y, t: now };
-  }
-  if (ai.target && !ai.target.alive) ai.target = null;
-  const tg = ai.target;
-  if (tg) ai.seenT += dt;
-
-  const useNext = z.stage === 'shrink' || (z.stage === 'wait' && z.until - now < 20);
-  const zx = useNext ? z.tx : z.x, zy = useNext ? z.ty : z.y, zr = useNext ? z.tr : z.r;
-  const outside = Math.hypot(t.x - z.x, t.y - z.y) > z.r - 25;
-  const zoneUrgent = outside || Math.hypot(t.x - zx, t.y - zy) > Math.max(zr - 70, zr * 0.8);
-
-  let gx = t.x, gy = t.y, move = true;
-  if (zoneUrgent) { gx = zx; gy = zy; ai.hide = -1; }
-  else if (tg) {
-    const d = dist(t, tg);
-    if (d > 360) { gx = tg.x; gy = tg.y; }
-    else if (d < 200) { gx = t.x * 2 - tg.x; gy = t.y * 2 - tg.y; }
-    else { const a = Math.atan2(tg.y - t.y, tg.x - t.x) + ai.side * Math.PI / 2; gx = t.x + Math.cos(a) * 60; gy = t.y + Math.sin(a) * 60; }
-    ai.hide = -1;
-  } else if (ai.lastSeen && now - ai.lastSeen.t < 4) {
-    const d = Math.hypot(ai.lastSeen.x - t.x, ai.lastSeen.y - t.y);
-    if (d > 260) { gx = ai.lastSeen.x; gy = ai.lastSeen.y; } else move = false;
-  } else if (t.hp < 50 && (ai.hide >= 0 || Math.random() < 0.03)) {
-    if (ai.hide < 0 || map.bushes[ai.hide].hp <= 0) {
-      let bd = 500; ai.hide = -1;
-      map.bushes.forEach((b, i) => { const d = Math.hypot(b.x - t.x, b.y - t.y); if (b.hp > 0 && d < bd) { bd = d; ai.hide = i; } });
-    }
-    if (ai.hide >= 0) { const b = map.bushes[ai.hide]; gx = b.x; gy = b.y; if (Math.hypot(b.x - t.x, b.y - t.y) < 8) move = false; }
-  } else {
-    if (ai.wT <= 0 || Math.hypot(ai.wx - t.x, ai.wy - t.y) < 30) {
-      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * Math.min(zr * 0.6, 700);
-      const cx = Math.hypot(t.x - zx, t.y - zy) < zr * 0.6 ? t.x : zx, cy = Math.hypot(t.x - zx, t.y - zy) < zr * 0.6 ? t.y : zy;
-      ai.wx = clamp(cx + Math.cos(a) * r, 80, MAP - 80); ai.wy = clamp(cy + Math.sin(a) * r, 80, MAP - 80); ai.wT = 5 + Math.random() * 4;
-      if (!onPlateau(map, ai.wx, ai.wy, 120)) { ai.wx = zx; ai.wy = zy; }
-    }
-    gx = ai.wx; gy = ai.wy;
-  }
-  let ang = Math.atan2(gy - t.y, gx - t.x);
-  if (Math.hypot(gx - t.x, gy - t.y) < 10) move = false;
-  if (move) {
-    for (let k = 0; k < 6; k++) {
-      if (!blockedAt(map, t.x + Math.cos(ang) * 46, t.y + Math.sin(ang) * 46)) break;
-      ang += ai.side * 0.7;
-    }
-  }
-
-  let aim = move ? ang : t.ta, fire = false;
-  if (tg) {
-    const d = dist(t, tg), tt = d / BSPEED;
-    const px = tg.x + tg.vx * tt * 0.8, py = tg.y + tg.vy * tt * 0.8;
-    const a = Math.atan2(py - t.y, px - t.x);
-    aim = a + ai.noise * Math.min(1.5, d / 400);
-    fire = ai.seenT > 0.55 && d < 560 && Math.abs(normAngle(a - t.ta)) < 0.14 && shotClear(map, t, tg, t.h);
-  } else if (ai.lastSeen && now - ai.lastSeen.t < 3) {
-    const bi = bushAt(map, ai.lastSeen.x, ai.lastSeen.y);
-    if (bi >= 0 && bi !== bushAt(map, t.x, t.y) && Math.hypot(ai.lastSeen.x - t.x, ai.lastSeen.y - t.y) < 480) {
-      const a = Math.atan2(ai.lastSeen.y - t.y, ai.lastSeen.x - t.x);
-      aim = a; fire = Math.abs(normAngle(a - t.ta)) < 0.15;
-    }
-  }
-  let block = false;
-  if (now >= t.blockReady && Math.random() < 0.5) {
-    for (const b of m.bullets) {
-      if (b.team === t.team) continue;
-      const dx = t.x - b.x, dy = t.y - b.y, d = Math.hypot(dx, dy);
-      if (d > 110 || d < 1) continue;
-      if ((b.vx * dx + b.vy * dy) / (BSPEED * d) > 0.96) { block = true; break; }
-    }
-  }
-  t.input = { dx: move ? Math.cos(ang) : 0, dy: move ? Math.sin(ang) : 0, aim, fire, block };
-}
-
-function stepMatch(m, now, dt) {
-  updateZone(m, now);
-  if (m.over) { updateBullets(m, now, dt); return; }
-  for (const t of m.tanks) if (t.alive && t.ph !== 'ground') updateAir(m, t, now, dt);
-  for (const t of m.tanks) if (t.alive && t.ph === 'ground' && t.bot) botThink(m, t, now, dt);
-  for (const t of m.tanks) if (t.alive && t.ph === 'ground') moveTank(m, t, now, dt);
-  const ground = m.tanks.filter(t => t.alive && t.ph === 'ground');
-  for (let i = 0; i < ground.length; i++) for (let j = i + 1; j < ground.length; j++) {
-    const a = ground[i], b = ground[j];
-    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), min = TR * 2;
-    if (d < min) {
-      const nx = d > 0.001 ? dx / d : 1, ny = d > 0.001 ? dy / d : 0, p = (min - d) / 2;
-      a.x -= nx * p; a.y -= ny * p; b.x += nx * p; b.y += ny * p;
-      collide(m.map, a); collide(m.map, b);
-    }
-  }
-  for (const t of ground) if (t.alive && !onPlateau(m.map, t.x, t.y)) fall(m, t, now);
-  updateBullets(m, now, dt);
-  const z = m.zone, dps = zoneDps(z);
-  for (const t of ground) {
-    if (!t.alive) continue;
-    if (Math.hypot(t.x - z.x, t.y - z.y) > z.r) {
-      t.hp -= dps * dt;
-      if (t.hp <= 0) eliminate(m, t, null, 'zone', now);
-    }
-  }
-}
-
-const r1 = (v) => Math.round(v * 10) / 10;
-function pickFocus(m, c, me) {
-  if (me.alive) return me;
-  let f = m.byId.get(c.focusId);
-  if (f && f.alive) return f;
-  f = m.tanks.find(t => t.alive && t.team === me.team) || (me.killerId && m.byId.get(me.killerId)) || m.tanks.find(t => t.alive) || me;
-  if (!f.alive) f = m.tanks.find(t => t.alive) || me;
-  c.focusId = f.id;
-  return f;
-}
-const PH = { ground: 0, bus: 1, drop: 2 };
-function sendStates(m, now) {
-  const z = m.zone, map = m.map;
-  const zone = { x: r1(z.x), y: r1(z.y), r: r1(z.r), tx: r1(z.tx), ty: r1(z.ty), tr: r1(z.tr), st: z.stage, left: r1(Math.max(0, z.until - now)), ph: z.phase };
-  const alive = m.tanks.filter(t => t.alive);
-  const teamsN = new Set(alive.map(t => t.team)).size;
-  const bp = busPos(m, now);
-  const bus = now < m.busEnd ? { x: r1(bp.x), y: r1(bp.y), k: Math.round(bp.k * 1000) / 1000, wait: r1(Math.max(0, m.busStart - now)), n: alive.filter(t => t.ph === 'bus').length } : null;
-  const occ = [];
-  for (const t of alive) if (t.ph === 'ground') { const bi = bushAt(map, t.x, t.y); if (bi >= 0 && !occ.includes(bi)) occ.push(bi); }
-  for (const pid of m.humans) {
-    const c = byPid.get(pid);
-    if (!c || c.match !== m) continue;
-    const me = m.byId.get(pid);
-    const f = pickFocus(m, c, me);
-    const near = (o, extra = 0) => Math.hypot(o.x - f.x, o.y - f.y) < VIEW_R + extra;
-    const tanks = [];
-    for (const t of alive) {
-      if (t.ph === 'bus') continue;
-      if (t !== f && t.team !== me.team && (!near(t) || hiddenFrom(map, t, f, now))) continue;
-      if (t.team === me.team && !near(t, 400)) continue;
-      tanks.push({
-        i: t.id, x: r1(t.x), y: r1(t.y), a: r1(t.a * 10) / 10, ta: r1(t.ta * 10) / 10, h: Math.round(t.h * 100) / 100, hp: Math.ceil(t.hp),
-        bk: now < t.blockUntil ? 1 : 0, ph: PH[t.ph], alt: t.ph === 'drop' ? Math.round(clamp(1 - (now - t.dropT0) / DROP_TIME, 0, 1) * 100) / 100 : 0,
-      });
-    }
-    send(c, {
-      t: 's', ts: Math.round(now * 1000), f: f.id,
-      me: {
-        hp: Math.ceil(Math.max(0, me.hp)), alive: me.alive, kills: me.kills, dmg: Math.round(me.dmg), ph: PH[me.ph],
-        bk: now < me.blockUntil ? 1 : 0, bl: r1(Math.max(0, me.blockReady - now)), rl: r1(Math.max(0, me.nextFire - now)),
-      },
-      bus, tanks,
-      b: m.bullets.filter(b => near(b)).map(b => [b.id, r1(b.x), r1(b.y), b.team === me.team ? 1 : 0, r1(b.a * 10) / 10]),
-      occ: occ.filter(i => near(map.bushes[i])),
-      ev: m.events.filter(e => e.g || (e.x !== undefined && near(e, 150))),
-      z: zone, al: alive.length, tl: teamsN,
-      mates: m.tanks.filter(t => t.team === me.team).map(t => [t.id, r1(t.x), r1(t.y), t.alive ? 1 : 0, Math.ceil(Math.max(0, t.hp))]),
-    });
-  }
-  m.events = [];
+function broadcastMessages() {
+  const list = activeMessages();
+  for (const c of online.values()) send(c, { t: 'messages', list });
 }
 
 // ================= Haupt-Takt =================
-const TICK = 1 / 40; // 40 Updates pro Sekunde für flüssige Bewegung
+const TICK = 1 / 40;
+let lastMM = 0, lastShopDay = CAT.dayIndex();
 setInterval(() => {
   const now = nowS();
-  for (const m of [...matches.values()]) {
-    const dt = clamp(now - m.lastTick, 0.001, 0.1);
-    m.lastTick = now;
-    try { stepMatch(m, now, dt); } catch (e) { console.error('Fehler im Match', e); }
-    if (!matches.has(m.id)) continue;
-    sendStates(m, now);
-    if (m.over && now >= m.endAt) {
-      for (const pid of [...m.humans]) {
-        const c = byPid.get(pid);
-        if (c && c.match === m) { c.match = null; send(c, { t: 'lobby' }); }
-      }
-      matches.delete(m.id);
-      socialDirty = true;
-    }
+  engine.tick(now);
+  if (now - lastMM > 0.5) {
+    lastMM = now;
+    matchmake(now);
+    const day = CAT.dayIndex();
+    if (day !== lastShopDay) { lastShopDay = day; for (const c of online.values()) sendShop(c); }
   }
-  matchmake(now);
   if (socialDirty) flushSocial();
 }, TICK * 1000);
 setInterval(() => { socialDirty = true; }, 2000);
+setInterval(() => { const before = (DB.meta().messages || []).length; if (activeMessages().length !== before) { DB.saveMeta(); broadcastMessages(); } }, 30000);
 
 // ================= WebSocket =================
 const wss = new WebSocketServer({ server: httpServer, maxPayload: 64 * 1024 });
-wss.on('connection', (ws) => {
-  const c = { ws, pid: null, name: '', skin: 'rot', level: 1, party: null, match: null, friends: new Map(), requests: new Map(), alive: true, focusId: null };
+wss.on('connection', (ws, req) => {
+  const c = { ws, pid: null, user: null, party: null, alive: true, admin: false, ip: (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim() };
   conns.add(c);
   ws.on('pong', () => { c.alive = true; });
   ws.on('message', (raw) => {
@@ -1006,4 +461,7 @@ setInterval(() => {
   }
 }, 25000);
 
-httpServer.listen(PORT, () => console.log(`PANZER läuft auf http://localhost:${PORT}`));
+DB.init().then(() => {
+  httpServer.listen(PORT, () => console.log(`PANZER läuft auf http://localhost:${PORT}`));
+}).catch((e) => { console.error('Datenbank-Start fehlgeschlagen:', e); process.exit(1); });
+process.on('SIGTERM', () => { DB.flush().finally(() => process.exit(0)); });

@@ -7,206 +7,32 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --paper: #f7f1e1; --card: #fffdf6; --ink: #2b2620; --soft: #6b6255; --line: #e2d8c2;
-    --yellow: #f2c94c; --red: #e8594f; --green: #6fcf6f; --blue: #4f86e8; --orange: #f2994a;
-    --r1: 255px 15px 225px 15px / 15px 225px 15px 255px;
-    --r2: 15px 225px 15px 255px / 255px 15px 225px 15px;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--paper); color: var(--ink);
-    font-family: 'Patrick Hand', 'Comic Sans MS', cursive; font-size: 18px; user-select: none; -webkit-user-select: none; }
-  .hidden { display: none !important; }
-  button { font: inherit; color: inherit; }
-  .hand { font-family: 'Gochi Hand', cursive; }
-  .sketch { background: var(--card); border: 3px solid var(--ink); border-radius: var(--r1); box-shadow: 5px 6px 0 rgba(43,38,32,.18); }
-  .btn { cursor: pointer; background: #fff; border: 3px solid var(--ink); padding: 6px 18px; border-radius: var(--r2);
-    box-shadow: 3px 4px 0 var(--ink); transition: transform .08s ease, box-shadow .08s ease; font-size: 19px; }
-  .btn:hover:not(:disabled) { transform: translate(-1px,-1px) rotate(-1deg); box-shadow: 4px 5px 0 var(--ink); }
-  .btn:active:not(:disabled) { transform: translate(2px,3px); box-shadow: 1px 1px 0 var(--ink); }
-  .btn:disabled { opacity: .45; cursor: default; }
-  .btn.small { font-size: 16px; padding: 2px 12px; box-shadow: 2px 3px 0 var(--ink); border-width: 2px; }
-  .btn.yellow { background: var(--yellow); }
-  .btn.green { background: #9fe0a0; }
-  .iconbtn { cursor: pointer; width: 44px; height: 44px; display: grid; place-items: center; background: #fff; border: 3px solid var(--ink);
-    border-radius: 12px 6px 14px 5px; box-shadow: 2px 3px 0 var(--ink); position: relative; }
-  .iconbtn:hover { transform: rotate(-3deg); }
-  .iconbtn svg { width: 24px; height: 24px; }
-  .badge { position: absolute; top: -8px; right: -8px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; background: var(--red);
-    color: #fff; border: 2px solid var(--ink); font-size: 14px; line-height: 18px; text-align: center; }
-  input.field { font: inherit; font-size: 24px; padding: 8px 14px; width: 100%; text-align: center; border: 3px solid var(--ink); background: #fff;
-    outline: none; color: var(--ink); border-radius: 225px 15px 255px 15px / 15px 255px 15px 225px; user-select: text; }
-  input.field:focus { box-shadow: 0 0 0 4px var(--yellow); }
-  canvas { display: block; }
-  .screen { position: fixed; inset: 0; }
-
-  /* ---------- Name ---------- */
-  #login { display: grid; place-items: center; padding: 16px; background: var(--paper); }
-  #loginBg { width: 100%; height: 100%; }
-  #login .card { padding: 34px 34px 28px; width: min(440px, 100%); text-align: center; display: flex; flex-direction: column; gap: 18px; position: relative; z-index: 1; }
-  .logo { font-family: 'Gochi Hand', cursive; font-size: 84px; line-height: .9; transform: rotate(-3deg); text-shadow: 4px 4px 0 var(--yellow); letter-spacing: 2px; margin: 0; }
-  #loginMsg { color: var(--soft); min-height: 22px; }
-
-  /* ---------- Lobby ---------- */
-  #lobby { display: flex; flex-direction: column; }
-  .topbar { display: flex; align-items: center; gap: 14px; padding: 10px 18px; border-bottom: 3px solid var(--ink); background: var(--card); position: relative; z-index: 3; }
-  .topbar .logo { font-size: 46px; text-shadow: 3px 3px 0 var(--yellow); }
-  .tabs { display: flex; gap: 6px; margin-left: 14px; }
-  .tab { cursor: pointer; background: none; border: none; font-family: 'Gochi Hand', cursive; font-size: 28px; padding: 2px 12px; color: var(--soft); }
-  .tab.on { color: var(--ink); text-decoration: underline wavy var(--yellow) 3px; text-underline-offset: 6px; }
-  .grow { flex: 1; }
-  .lvl { display: flex; align-items: center; gap: 8px; }
-  .lvl .ring { width: 46px; height: 46px; border-radius: 50%; border: 3px solid var(--ink); background: var(--yellow); display: grid; place-items: center;
-    font-family: 'Gochi Hand', cursive; font-size: 22px; line-height: 1; }
-  .lvl .bar { width: 120px; height: 14px; border: 2px solid var(--ink); border-radius: 8px; background: #fff; overflow: hidden; }
-  .lvl .bar i { display: block; height: 100%; background: var(--green); }
-  .lvl small { display: block; color: var(--soft); font-size: 14px; }
-  .namebtn { cursor: pointer; border: none; background: none; font-size: 22px; font-weight: bold; padding: 0 4px; }
-  .namebtn:hover { text-decoration: underline; }
-
-  .stagewrap { position: relative; flex: 1; min-height: 0; }
-  #stage { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .playbox { position: absolute; right: 26px; bottom: 26px; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; z-index: 2; }
-  .mode { background: var(--card); border: 3px solid var(--ink); border-radius: 10px 4px 12px 4px; padding: 4px 14px; text-align: left; }
-  .mode b { font-family: 'Gochi Hand', cursive; font-size: 26px; display: block; line-height: 1; }
-  .mode span { color: var(--soft); font-size: 16px; }
-  #btnPlay { font-family: 'Gochi Hand', cursive; font-size: 58px; padding: 6px 48px 10px; background: var(--yellow); border-width: 4px; box-shadow: 6px 7px 0 var(--ink); min-width: 330px; }
-  #btnPlay.searching { background: #fff; font-size: 34px; }
-  #queueInfo { font-size: 18px; color: var(--soft); min-height: 22px; }
-  .partybox { position: absolute; left: 26px; bottom: 26px; z-index: 2; display: flex; gap: 10px; align-items: center; }
-
-  /* Spind */
-  #locker { position: absolute; inset: 0; overflow-y: auto; padding: 26px; }
-  #locker h2 { font-family: 'Gochi Hand', cursive; font-size: 40px; margin: 0 0 4px; }
-  #locker .sub { color: var(--soft); margin-bottom: 18px; }
-  .skins { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 16px; }
-  .skin { cursor: pointer; padding: 10px; text-align: center; border: 3px solid var(--ink); background: #fff; border-radius: 18px 6px 20px 8px / 8px 20px 6px 18px; position: relative; }
-  .skin:hover { transform: rotate(-1deg) translateY(-2px); }
-  .skin.on { box-shadow: 0 0 0 5px var(--yellow); }
-  .skin.locked { cursor: default; opacity: .55; }
-  .skin.locked:hover { transform: none; }
-  .skin canvas { width: 150px; height: 100px; margin: 0 auto; }
-  .skin .n { font-size: 20px; font-weight: bold; }
-  .skin .l { font-size: 15px; color: var(--soft); }
-
-  /* Freunde-Leiste */
-  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(380px, 100%); background: var(--card); border-left: 3px solid var(--ink);
-    z-index: 20; transform: translateX(105%); transition: transform .22s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; box-shadow: -6px 0 0 rgba(43,38,32,.12); }
-  #drawer.open { transform: none; }
-  .dhead { display: flex; align-items: center; padding: 14px 16px; border-bottom: 3px solid var(--ink); }
-  .dhead h3 { font-family: 'Gochi Hand', cursive; font-size: 32px; margin: 0; flex: 1; }
-  .dadd { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 2px dashed var(--line); }
-  .dadd input { font: inherit; font-size: 18px; flex: 1; min-width: 0; padding: 4px 10px; border: 2px solid var(--ink); border-radius: 8px 3px 9px 4px; outline: none; user-select: text; }
-  .dbody { overflow-y: auto; flex: 1; padding: 6px 16px 20px; }
-  .sec { font-family: 'Gochi Hand', cursive; font-size: 22px; margin: 14px 0 6px; color: var(--soft); }
-  .row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 2px dotted var(--line); }
-  .row .dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink); flex: none; }
-  .row .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 19px; }
-  .row .st { font-size: 14px; color: var(--soft); display: block; }
-  .row .x { cursor: pointer; border: none; background: none; color: var(--soft); font-size: 20px; padding: 0 4px; }
-  .row .x:hover { color: var(--red); }
-  .empty { color: var(--soft); font-size: 16px; padding: 6px 4px; }
-
-  /* Einladungen */
-  #invites { position: fixed; top: 84px; right: 18px; display: flex; flex-direction: column; gap: 10px; z-index: 30; }
-  .inv { padding: 14px 16px; width: 300px; animation: pop .35s ease-out; }
-  .inv b { font-size: 20px; }
-  .inv .acts { display: flex; gap: 8px; margin-top: 10px; }
-  @keyframes pop { 0% { transform: scale(.7) rotate(-5deg); opacity: 0; } 70% { transform: scale(1.04) rotate(1deg); opacity: 1; } 100% { transform: none; } }
-
-  #toasts { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; align-items: center; z-index: 40; pointer-events: none; }
-  .toast { background: var(--card); border: 2px solid var(--ink); padding: 6px 16px; border-radius: 12px 4px 14px 5px; box-shadow: 3px 3px 0 rgba(0,0,0,.2); animation: tin .25s ease-out; }
-  @keyframes tin { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
-
-  /* ---------- Spiel ---------- */
-  #game { cursor: none; }
-  #cv { position: absolute; inset: 0; width: 100%; height: 100%; }
-  #mini { position: absolute; top: 12px; right: 12px; width: 190px; height: 190px; border: 3px solid var(--ink); border-radius: 10px 4px 12px 4px; background: var(--paper); }
-  #feed { position: absolute; top: 212px; right: 12px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; pointer-events: none; font-size: 16px; }
-  #feed div { background: rgba(255,253,246,.92); border: 2px solid var(--ink); border-radius: 8px; padding: 0 8px; max-width: 320px; }
-  #feed div.mine { background: var(--yellow); }
-  #hudTop { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; }
-  .pill { display: inline-flex; gap: 14px; align-items: center; background: rgba(255,253,246,.94); border: 3px solid var(--ink); border-radius: 12px 4px 14px 5px; padding: 2px 14px; font-size: 20px; }
-  .pill b { font-family: 'Gochi Hand', cursive; font-size: 28px; line-height: 1; }
-  #zoneInfo { margin-top: 6px; font-size: 18px; display: inline-block; background: rgba(255,253,246,.94); border: 2px solid var(--ink); border-radius: 8px; padding: 0 10px; }
-  #zoneInfo.warn { background: #cfd8ff; }
-  #hudBottom { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
-  .hp { width: 360px; max-width: 80vw; height: 30px; border: 3px solid var(--ink); background: #fff; border-radius: 10px 4px 12px 4px; position: relative; overflow: hidden; }
-  .hp i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--green); transition: width .15s; }
-  .hp i.lag { background: #ffb4a8; transition: width .6s .25s; }
-  .hp span { position: absolute; inset: 0; text-align: center; font-family: 'Gochi Hand', cursive; font-size: 22px; line-height: 24px; }
-  .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
-  .chip { border: 2px solid var(--ink); border-radius: 8px; padding: 0 8px; font-size: 16px; background: #fff; }
-  #btnMenu { position: absolute; left: 12px; top: 12px; z-index: 4; cursor: pointer; }
-  #gameMenu { position: absolute; inset: 0; z-index: 30; background: rgba(43,38,32,.4); display: grid; place-items: center; cursor: default; }
-  .menucard { padding: 26px 34px 20px; width: min(420px, 92vw); display: flex; flex-direction: column; gap: 14px; animation: pop .25s ease-out; }
-  .btn.big { font-family: 'Gochi Hand', cursive; font-size: 30px; padding: 8px 18px; }
-  #mates { position: absolute; left: 12px; top: 66px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
-  .mate { background: rgba(255,253,246,.94); border: 2px solid var(--ink); border-radius: 8px; padding: 2px 8px; width: 180px; font-size: 16px; }
-  .mate .mb { height: 7px; border: 1.5px solid var(--ink); border-radius: 4px; margin-top: 2px; overflow: hidden; background: #fff; }
-  .mate .mb i { display: block; height: 100%; background: var(--green); }
-  .mate.dead { opacity: .5; text-decoration: line-through; }
-  #center { position: absolute; left: 50%; top: 30%; transform: translate(-50%,-50%); text-align: center; pointer-events: none; }
-  #center .big { font-family: 'Gochi Hand', cursive; font-size: clamp(40px, 7vw, 86px); text-shadow: 3px 3px 0 var(--yellow); line-height: 1; animation: pop .3s ease-out; }
-  #center .small { font-size: 22px; background: rgba(255,253,246,.9); border: 2px solid var(--ink); border-radius: 8px; padding: 0 10px; display: inline-block; margin-top: 6px; }
-  #vignette { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 140px 40px rgba(70,90,220,.55); opacity: 0; transition: opacity .3s; }
-  #hurt { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 120px 30px rgba(220,50,40,.6); opacity: 0; }
-  .overlay { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); text-align: center; padding: 22px 34px; min-width: 340px; cursor: default; z-index: 5; }
-  .overlay .t { font-family: 'Gochi Hand', cursive; font-size: 64px; line-height: 1; }
-  .overlay .s { color: var(--soft); font-size: 20px; margin: 6px 0 12px; }
-  .stats { display: flex; gap: 22px; justify-content: center; margin: 10px 0 16px; }
-  .stats div { font-size: 16px; color: var(--soft); }
-  .stats b { display: block; font-family: 'Gochi Hand', cursive; font-size: 36px; color: var(--ink); line-height: 1; }
-  .overlay .acts { display: flex; gap: 10px; justify-content: center; }
-  #deathCard { top: auto; bottom: 90px; transform: translateX(-50%); padding: 12px 24px; }
-  #deathCard .t { font-size: 40px; }
-  #tutorial { position: absolute; left: 50%; top: 76%; transform: translate(-50%,-50%); text-align: center; pointer-events: none; z-index: 4; }
-  #tutorial div { font-family: 'Gochi Hand', cursive; font-size: clamp(30px, 4.4vw, 54px); background: rgba(255,253,246,.94); border: 4px solid var(--ink);
-    padding: 10px 28px; border-radius: var(--r1); box-shadow: 6px 7px 0 rgba(43,38,32,.25); animation: pop .35s ease-out; max-width: 90vw; }
-
-  #bigmap { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(86vh, 92vw); height: min(86vh, 92vw);
-    border: 4px solid var(--ink); border-radius: 14px 6px 16px 6px; box-shadow: 8px 9px 0 rgba(43,38,32,.3); background: #cfe8f7; z-index: 6; pointer-events: none; }
-  #fps { position: absolute; left: 12px; bottom: 10px; font-size: 14px; color: var(--soft); pointer-events: none; }
-
-  /* Einstellungen */
-  #settings { position: fixed; inset: 0; z-index: 35; background: rgba(43,38,32,.35); display: grid; place-items: center; padding: 16px; cursor: default; }
-  .setcard { width: min(640px, 100%); max-height: 92vh; display: flex; flex-direction: column; animation: pop .3s ease-out; }
-  .sethead { display: flex; align-items: center; padding: 12px 18px; border-bottom: 3px solid var(--ink); }
-  .sethead h2 { flex: 1; margin: 0; font-size: 36px; }
-  .setbody { overflow-y: auto; padding: 6px 20px 14px; }
-  .setsec h3 { font-family: 'Gochi Hand', cursive; font-size: 26px; margin: 14px 0 4px; }
-  .srow { display: flex; align-items: center; gap: 12px; padding: 6px 2px; border-bottom: 2px dotted var(--line); }
-  .srow > span { flex: 1; }
-  .srow small { color: var(--soft); font-size: 14px; display: block; }
-  .srow b { min-width: 46px; text-align: right; }
-  .srow input[type=range] { width: 180px; accent-color: #e0a400; }
-  .srow input[type=checkbox] { width: 22px; height: 22px; accent-color: #e0a400; }
-  .srow select { font: inherit; font-size: 17px; border: 2px solid var(--ink); border-radius: 8px; padding: 2px 8px; background: #fff; }
-  .keybtn { min-width: 120px; font: inherit; font-size: 17px; cursor: pointer; background: #fff; border: 2px solid var(--ink); border-radius: 8px 3px 9px 4px; padding: 2px 10px; box-shadow: 2px 2px 0 var(--ink); }
-  .keybtn.wait { background: var(--yellow); }
-  .swatches { display: flex; gap: 8px; }
-  .swatches button { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--ink); cursor: pointer; }
-  .swatches button.on { box-shadow: 0 0 0 3px var(--yellow); }
-  .hint2 { color: var(--soft); font-size: 15px; margin-top: 6px; }
-  .setfoot { display: flex; gap: 10px; align-items: center; padding: 12px 18px; border-top: 3px solid var(--ink); }
-
-  @media (max-width: 760px) {
-    .topbar .logo { font-size: 34px; } .tabs { margin-left: 0; } .tab { font-size: 22px; } .lvl .bar, .lvl small { display: none; }
-    #btnPlay { font-size: 42px; min-width: 220px; } #mini { width: 130px; height: 130px; } #feed { top: 150px; }
-  }
-</style>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-coin" viewBox="0 0 40 40"><g transform="translate(20 20)">
+      <path fill="#f2b705" stroke="#fff" stroke-width="3" stroke-linejoin="round" d="M0,-19 L3,-15 L7,-18 L9,-13 L13,-14 L13,-10 L18,-9 L15,-5 L19,-2 L15,1 L18,5 L13,6 L14,10 L9,10 L8,15 L4,13 L1,18 L-2,14 L-6,17 L-7,12 L-12,13 L-11,8 L-16,7 L-13,3 L-18,0 L-14,-3 L-17,-7 L-12,-8 L-13,-13 L-8,-12 L-6,-17 L-2,-14 Z"/>
+      <circle r="10.5" fill="#ffd84a" stroke="#b07d0a" stroke-width="1"/>
+      <path fill="#fff3b0" stroke="#c08a10" stroke-width="1" d="M0,-7.5 L2,-2.6 L7.1,-2.3 L3.1,1 L4.4,6.1 L0,3.2 L-4.4,6.1 L-3.1,1 L-7.1,-2.3 L-2,-2.6 Z"/></g></symbol>
+    <symbol id="i-friends" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.6c2.8-.3 5 1.3 5.6 4.6"/></g></symbol>
+    <symbol id="i-full" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></g></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
 <!-- Name -->
 <div id="login" class="screen">
-  <canvas id="loginBg" class="screen"></canvas>
-  <div class="card sketch">
+  <canvas id="loginBg"></canvas>
+  <div class="card panel">
     <h1 class="logo">PANZER</h1>
-    <input id="nameInput" class="field" maxlength="16" placeholder="Dein Name" autocomplete="off">
-    <button id="btnLogin" class="btn yellow" style="font-size:26px">Weiter</button>
+    <div class="sub">Battle Royale aus Papier</div>
+    <input id="nameInput" class="field" maxlength="16" placeholder="Dein Name" autocomplete="off" spellcheck="false">
+    <button id="btnLogin" class="btn yellow big">Weiter</button>
     <div id="loginMsg"></div>
   </div>
 </div>
@@ -214,37 +40,53 @@
 <!-- Lobby -->
 <div id="lobby" class="screen hidden">
   <div class="topbar">
-    <div class="logo">PANZER</div>
-    <div class="tabs">
+    <div class="logo small">PANZER</div>
+    <nav class="tabs">
       <button class="tab on" data-tab="stage">Lobby</button>
       <button class="tab" data-tab="locker">Spind</button>
+      <button class="tab" data-tab="abilities">Fähigkeiten</button>
+      <button class="tab" data-tab="shop">Shop</button>
       <button class="tab" data-tab="settings">Einstellungen</button>
-    </div>
+    </nav>
     <div class="grow"></div>
-    <div class="lvl">
-      <canvas id="rankIcon" width="150" height="150" style="width:64px;height:64px;margin:-6px 0 -10px"></canvas>
-      <div><b id="rankName" class="hand" style="font-size:22px;line-height:1">Bronze I</b><div class="bar"><i id="xpBar" style="width:0"></i></div><small id="xpText">0 / 100 RP</small></div>
+    <div class="coins" title="Zahnräder"><svg><use href="#i-coin"/></svg><b id="coinCount">0</b></div>
+    <div class="rankbox" title="Rang">
+      <canvas id="rankIcon" width="120" height="120"></canvas>
+      <div><b id="rankName">Bronze I</b><div class="bar"><i id="rankBar"></i></div><small id="rankText">0 / 100 RP</small></div>
     </div>
     <button class="namebtn" id="btnName" title="Name ändern"></button>
+    <button class="iconbtn" id="btnFull" title="Vollbild (F11)"><svg><use href="#i-full"/></svg></button>
     <button class="iconbtn" id="btnSound" title="Ton an/aus"></button>
-    <button class="iconbtn" id="btnFriends" title="Freunde">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#2b2620" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.6c2.8-.3 5 1.3 5.6 4.6"/></svg>
-      <span class="badge hidden" id="friendBadge">0</span>
-    </button>
+    <button class="iconbtn" id="btnFriends" title="Freunde"><svg><use href="#i-friends"/></svg><span class="badge hidden" id="friendBadge">0</span></button>
   </div>
   <div class="stagewrap">
     <canvas id="stage"></canvas>
-    <div id="locker" class="hidden">
+    <div id="msgBanner" class="hidden"></div>
+    <section id="tabLocker" class="tabpage hidden">
       <h2>Spind</h2>
-      <div class="sub">Neue Lackierungen schaltest du mit höherem Rang frei.</div>
-      <div class="skins" id="skins"></div>
-    </div>
-    <div class="partybox" id="partybox">
-      <button class="btn small" id="btnLeaveParty">Party verlassen</button>
-    </div>
+      <div class="cats" id="lockerCats"></div>
+      <div class="grid" id="lockerGrid"></div>
+    </section>
+    <section id="tabAbilities" class="tabpage hidden">
+      <h2>Fähigkeiten</h2>
+      <div class="sub">Mit jedem Rang schaltest du eine neue Fähigkeit frei. Im Spiel benutzt du sie mit <b id="abKeyHint">F</b>.</div>
+      <div class="grid abil" id="abilityGrid"></div>
+    </section>
+    <section id="tabShop" class="tabpage hidden">
+      <h2>Shop <small id="shopTimer"></small></h2>
+      <div class="sub">Jeden Tag 4 neue Angebote. Zahnräder bekommst du für Platzierungen und Eliminierungen.</div>
+      <div class="grid shop" id="shopGrid"></div>
+    </section>
+    <div class="partybox" id="partybox"><button class="btn small" id="btnLeaveParty">Party verlassen</button></div>
     <div class="playbox" id="playbox">
-      <div class="mode"><b>BATTLE ROYALE</b><span id="modeSub">Solo</span></div>
-      <button class="btn" id="btnPlay">SPIELEN</button>
+      <div class="modecard panel">
+        <div class="modetitle">BATTLE ROYALE</div>
+        <div class="seg" id="modeSeg">
+          <button data-mode="solo">Solo</button><button data-mode="duo">Duo</button><button data-mode="squad">Squad</button>
+        </div>
+        <label class="fill"><input type="checkbox" id="fillBox"> Auffüllen</label>
+      </div>
+      <button class="btn yellow huge" id="btnPlay">SPIELEN</button>
       <div id="queueInfo"></div>
     </div>
   </div>
@@ -252,26 +94,77 @@
 
 <!-- Freunde -->
 <div id="drawer">
-  <div class="dhead"><h3>Freunde</h3><button class="iconbtn" id="btnCloseDrawer" title="Schließen">
-    <svg viewBox="0 0 24 24" fill="none" stroke="#2b2620" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-  <div class="dadd"><input id="addName" maxlength="16" placeholder="Name des Spielers"><button class="btn small yellow" id="btnAdd">Hinzufügen</button></div>
+  <div class="dhead"><h3>Freunde</h3><button class="iconbtn" id="btnCloseDrawer"><svg><use href="#i-close"/></svg></button></div>
+  <div class="dadd"><input id="addName" maxlength="16" placeholder="Name des Spielers" spellcheck="false"><button class="btn small yellow" id="btnAdd">Hinzufügen</button></div>
   <div class="dbody" id="dbody"></div>
 </div>
-
 <div id="invites"></div>
 
-<!-- Einstellungen (Lobby-Tab und im Spiel mit Esc) -->
-<div id="settings" class="hidden">
-  <div class="setcard sketch">
-    <div class="sethead"><h2 class="hand">Einstellungen</h2><button class="iconbtn" id="btnSetClose" title="Schließen">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#2b2620" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+<!-- Spiel -->
+<div id="game" class="screen hidden">
+  <canvas id="cv"></canvas>
+  <div id="vignette"></div>
+  <div id="lowhp"></div>
+  <div id="hurt"></div>
+  <button id="btnMenu" class="iconbtn" title="Menü (Esc)"><svg><use href="#i-menu"/></svg></button>
+  <canvas id="mini"></canvas>
+  <canvas id="bigmap" class="hidden"></canvas>
+  <div id="feed"></div>
+  <div id="mates"></div>
+  <div id="hudTop">
+    <div class="pill panel"><span><b id="hAlive">0</b> übrig</span><span><b id="hKills">0</b> Kills</span></div>
+    <div id="zoneInfo" class="tag"></div>
+  </div>
+  <div id="poiName"></div>
+  <div id="hudBottom">
+    <div class="chips" id="chips"></div>
+    <div class="hprow">
+      <div class="abbox" id="abBox"><canvas id="abIcon" width="120" height="120"></canvas><div class="abcd" id="abCd"></div><span class="abkey" id="abKey">F</span></div>
+      <div class="hp"><i class="lag" id="hpLag"></i><i id="hpBar"></i><span id="hpText">150</span></div>
+    </div>
+  </div>
+  <div id="center"></div>
+  <div id="tutorial"></div>
+  <div id="fps"></div>
+  <div id="gameMenu" class="hidden">
+    <div class="menucard panel">
+      <div class="logo">PANZER</div>
+      <button class="btn yellow big" id="mResume">ZURÜCK ZUM SPIEL</button>
+      <button class="btn big" id="mSettings">EINSTELLUNGEN</button>
+      <button class="btn big" id="mFull">VOLLBILD</button>
+      <button class="btn big red" id="mLeave">SPIEL VERLASSEN</button>
+      <div class="hint" id="mHint"></div>
+    </div>
+  </div>
+  <div id="deathCard" class="overlay panel hidden">
+    <div class="t">Eliminiert</div>
+    <div class="s" id="deathBy"></div>
+    <div class="acts"><button class="btn small" id="btnSpec">Nächster Spieler</button><button class="btn small yellow" id="btnLobby1">Zur Lobby</button></div>
+  </div>
+  <div id="resultCard" class="overlay panel hidden">
+    <canvas id="resRank" width="220" height="220"></canvas>
+    <div class="t" id="resTitle"></div>
+    <div class="s" id="resSub"></div>
+    <div class="rpbar"><i id="resBarOld"></i><i id="resBarNew"></i></div>
+    <div class="rptext" id="resRpText"></div>
+    <div class="stats">
+      <div><b id="resKills">0</b>Kills</div><div><b id="resDmg">0</b>Schaden</div><div><b id="resRp">0</b>RP</div><div><b id="resCoins">0</b>Zahnräder</div>
+    </div>
+    <div class="acts"><button class="btn small" id="btnWatch">Weiter zuschauen</button><button class="btn yellow" id="btnLobby2">Zur Lobby</button></div>
+  </div>
+</div>
+
+<!-- Einstellungen -->
+<div id="settings" class="modal hidden">
+  <div class="setcard panel">
+    <div class="sethead"><h2>Einstellungen</h2><button class="iconbtn" id="btnSetClose"><svg><use href="#i-close"/></svg></button></div>
     <div class="setbody">
       <div class="setsec">
         <h3>Steuerung</h3>
         <label class="srow"><span>Maus-Empfindlichkeit</span><input type="range" id="sSens" min="0.3" max="3" step="0.05"><b id="sSensV"></b></label>
-        <label class="srow"><span>Maus im Spiel einfangen <small>(nötig für die Empfindlichkeit)</small></span><input type="checkbox" id="sLock"></label>
+        <label class="srow"><span>Maus im Spiel einfangen <small>nötig für die Empfindlichkeit</small></span><input type="checkbox" id="sLock"></label>
         <div id="sKeys"></div>
-        <div class="hint2">Linke Maustaste schießt und rechte Maustaste blockt immer. Die Pfeiltasten fahren immer.</div>
+        <div class="hint2">Linke Maustaste schießt, rechte Maustaste blockt, die Pfeiltasten fahren immer.</div>
       </div>
       <div class="setsec">
         <h3>Ton</h3>
@@ -281,80 +174,61 @@
       <div class="setsec">
         <h3>Grafik</h3>
         <label class="srow"><span>Qualität</span><select id="sQual"><option value="hoch">Hoch</option><option value="mittel">Mittel</option><option value="niedrig">Niedrig (mehr FPS)</option></select></label>
+        <label class="srow"><span>FPS-Limit <small>Unbegrenzt = so viele Bilder wie dein PC schafft</small></span><select id="sFpsLimit"><option value="0">Unbegrenzt</option><option value="240">240</option><option value="144">144</option><option value="120">120</option><option value="60">60</option><option value="-1">Monitor (VSync)</option></select></label>
         <label class="srow"><span>Kamera-Zoom</span><input type="range" id="sZoom" min="0.75" max="1.3" step="0.05"><b id="sZoomV"></b></label>
         <label class="srow"><span>Bildschirm wackelt bei Treffern</span><input type="checkbox" id="sShake"></label>
-        <label class="srow"><span>FPS-Limit <small>(Unbegrenzt = so viele Bilder wie dein PC schafft)</small></span><select id="sFpsLimit"><option value="0">Unbegrenzt</option><option value="240">240</option><option value="144">144</option><option value="120">120</option><option value="60">60</option><option value="-1">Monitor (VSync)</option></select></label>
         <label class="srow"><span>FPS anzeigen</span><input type="checkbox" id="sFps"></label>
       </div>
       <div class="setsec">
         <h3>Fadenkreuz</h3>
         <div class="srow"><span>Farbe</span><div id="sCross" class="swatches"></div></div>
-        <label class="srow"><span>Größe</span><input type="range" id="sCrossSize" min="0.6" max="1.8" step="0.05"><canvas id="sCrossPrev" width="96" height="96" style="width:48px;height:48px"></canvas></label>
+        <label class="srow"><span>Größe</span><input type="range" id="sCrossSize" min="0.6" max="1.8" step="0.05"><canvas id="sCrossPrev" width="96" height="96"></canvas></label>
       </div>
       <div class="setsec">
         <h3>Konto</h3>
-        <div class="srow"><span>Konto löschen <small>(Name, Rang, Freunde und Skins werden gelöscht, der Name wird frei)</small></span><button class="btn small" id="btnDelete" style="background:#ffb4a8">Konto löschen</button></div>
+        <div class="srow"><span>Konto löschen <small>Name, Rang, Zahnräder, Freunde und Items werden gelöscht, der Name wird frei</small></span><button class="btn small red" id="btnDelete">Konto löschen</button></div>
       </div>
     </div>
-    <div class="setfoot">
-      <button class="btn small" id="btnSetReset">Standard</button>
-      <button class="btn small hidden" id="btnSetLeave">Spiel verlassen</button>
-      <span class="grow"></span>
-      <button class="btn yellow" id="btnSetDone">Fertig</button>
-    </div>
+    <div class="setfoot"><button class="btn small" id="btnSetReset">Standard</button><span class="grow"></span><button class="btn yellow" id="btnSetDone">Fertig</button></div>
   </div>
 </div>
 
-<!-- Spiel -->
-<div id="game" class="screen hidden">
-  <canvas id="cv"></canvas>
-  <div id="vignette"></div>
-  <div id="hurt"></div>
-  <button id="btnMenu" class="iconbtn" title="Menü (Esc)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="#2b2620" stroke-width="2.6" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
-  </button>
-  <div id="gameMenu" class="hidden">
-    <div class="menucard sketch">
-      <div class="logo" style="font-size:54px;text-align:center">PANZER</div>
-      <button class="btn yellow big" id="mResume">ZURÜCK ZUM SPIEL</button>
-      <button class="btn big" id="mSettings">EINSTELLUNGEN</button>
-      <button class="btn big" id="mLeave" style="background:#ffb4a8">SPIEL VERLASSEN</button>
-      <div class="hint" id="mHint">Esc schließt das Menü</div>
+<!-- Admin -->
+<div id="adminLogin" class="modal hidden">
+  <div class="card panel" style="width:min(360px,92vw)">
+    <h2>Admin</h2>
+    <input id="adUser" class="field" placeholder="Benutzer" autocomplete="off" spellcheck="false">
+    <input id="adPass" class="field" placeholder="Passwort" type="password" autocomplete="off">
+    <div class="acts"><button class="btn small" id="adCancel">Abbrechen</button><button class="btn yellow" id="adGo">Anmelden</button></div>
+    <div id="adMsg" class="err"></div>
+  </div>
+</div>
+<div id="adminPanel" class="modal hidden">
+  <div class="admincard panel">
+    <div class="sethead"><h2>Admin-Panel</h2><div id="adStats" class="adstats"></div><button class="iconbtn" id="adClose"><svg><use href="#i-close"/></svg></button></div>
+    <div class="adbody">
+      <div class="adcol">
+        <div class="adbar">
+          <input id="adSearch" placeholder="Spieler suchen" spellcheck="false">
+          <input id="adAllCoins" type="number" placeholder="Zahnräder" style="width:110px">
+          <button class="btn small yellow" id="adGiveAll">An alle verteilen</button>
+          <button class="btn small red" id="adDelAll">Alle löschen</button>
+        </div>
+        <div class="adlist" id="adList"></div>
+      </div>
+      <div class="adcol narrow">
+        <h3>Lobby-Nachricht</h3>
+        <textarea id="adMsgText" maxlength="200" placeholder="Nachricht an alle Spieler"></textarea>
+        <div class="adbar"><input id="adMsgMin" type="number" value="30" min="1" style="width:80px"> Minuten <button class="btn small yellow" id="adMsgSend">Senden</button></div>
+        <div id="adMsgs"></div>
+      </div>
     </div>
-  </div>
-  <canvas id="mini"></canvas>
-  <canvas id="bigmap" class="hidden"></canvas>
-  <div id="feed"></div>
-  <div id="mates"></div>
-  <div id="hudTop">
-    <div class="pill"><span><b id="hAlive">0</b> übrig</span><span><b id="hKills">0</b> Kills</span></div><br>
-    <div id="zoneInfo"></div>
-  </div>
-  <div id="hudBottom">
-    <div class="chips" id="chips"></div>
-    <div class="hp"><i class="lag" id="hpLag"></i><i id="hpBar"></i><span id="hpText">100</span></div>
-  </div>
-  <div id="center"></div>
-  <div id="tutorial"></div>
-  <div id="fps"></div>
-  <div id="deathCard" class="overlay sketch hidden">
-    <div class="t">Ausgeschieden</div>
-    <div class="s" id="deathBy"></div>
-    <div class="acts"><button class="btn small" id="btnSpec">Nächster Spieler</button><button class="btn small yellow" id="btnLobby1">Zur Lobby</button></div>
-  </div>
-  <div id="resultCard" class="overlay sketch hidden">
-    <canvas id="resRank" width="200" height="200" style="width:100px;height:100px;margin:0 auto -6px"></canvas>
-    <div class="t" id="resTitle"></div>
-    <div class="s" id="resSub"></div>
-    <div class="stats">
-      <div><b id="resKills">0</b>Kills</div><div><b id="resDmg">0</b>Schaden</div><div><b id="resXp">0</b>Rangpunkte</div>
-    </div>
-    <div class="acts"><button class="btn small" id="btnWatch">Weiter zuschauen</button><button class="btn yellow" id="btnLobby2">Zur Lobby</button></div>
   </div>
 </div>
 
 <div id="toasts"></div>
 
+<script src="catalog.js"></script>
 <script src="draw.js"></script>
 <script src="client.js"></script>
 <script src="settings.js"></script>
