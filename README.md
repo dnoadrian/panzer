@@ -7,7 +7,7 @@ Battle Royale mit Panzern im Papier-Look (wie Paper Mario), aus der Vogelperspek
 - **Lila Sturm**, 5 Stufen, Runde ca. 4 Minuten. 10 Spieler (Squad 12), Bots füllen auf.
 - **Modi** Solo / Duo / Squad, **Auffüllen** an/aus. Wer gleichzeitig sucht, landet im selben Spiel.
 - 150 Leben, +50 Leben pro Eliminierung, Selbstreparatur nach 5 s ohne Schaden. Blocken mit Shift.
-- **18 Fähigkeiten** (eine pro Rang, Taste F) – vom Turbo bis Wallhack + Aimbot (Unreal).
+- **19 Fähigkeiten** (Taste F) – vom Turbo bis „Übermacht“ (Unreal). Wallhack + Aimbot gibt es nur für die drei besten Unreal-Spieler.
 - **Ränge** Bronze I bis Unreal mit Abzeichen, **Zahnräder** als Münzen, **täglicher Shop** (Leuchtspur, Lackierung, Hut, Kill-Finisher).
 - Freunde per Name (auch offline), Party bis 4, Lobby-Nachrichten, Einstellungen (Esc), große Karte (M), Vollbild.
 

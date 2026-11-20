@@ -195,7 +195,7 @@ function updateHud(s) {
   setText('hAlive', String(s.al));
   setText('hKills', String(s.me.kills));
   const z = s.z;
-  setText('zoneInfo', s.bus ? `Kampfbus: ${s.bus.n} noch an Bord` : z.st === 'wait' ? `Sturm zieht zu in ${fmt(z.left)}` : z.st === 'shrink' ? 'Der Sturm zieht sich zusammen!' : 'Letzter Kreis');
+  setText('zoneInfo', s.bus && s.bus.n > 0 ? `Kampfbus: ${s.bus.n} noch an Bord` : z.st === 'wait' ? `Sturm zieht zu in ${fmt(z.left)}` : z.st === 'shrink' ? 'Der Sturm zieht sich zusammen!' : 'Letzter Kreis');
   const myT = s.tanks.find(t => t.i === me.pid);
   const outside = !!myT && s.me.ph === 0 && Math.hypot(myT.x - z.x, myT.y - z.y) > z.r;
   $('zoneInfo').classList.toggle('warn', outside || z.st === 'shrink');
@@ -670,7 +670,7 @@ function predictMe(dt, s) {
   const { dx, dy } = readMove(), len = Math.hypot(dx, dy);
   const mt = s.tanks.find(t => t.i === me.pid) || {};
   if (len > 0) {
-    let sp = SPEED * (s.me.bk ? 0.6 : 1) * (mt.tb ? 1.6 : 1) * (mt.emp ? 0.5 : 1) * (prof.cheats && prof.cheats.speed ? 1.8 : 1);
+    let sp = SPEED * (s.me.bk ? 0.6 : 1) * (mt.tb ? 1.7 : 1) * (mt.emp ? 0.5 : 1) * (prof.cheats && prof.cheats.speed ? 1.8 : 1);
     if (inLake(Pp.x, Pp.y)) sp *= LAKE_SLOW;
     Pp.x += dx / len * sp * dt; Pp.y += dy / len * sp * dt;
     for (const list of [G.map.mountains, G.map.rocks, G.map.trees, G.map.mills]) for (const o of list) {

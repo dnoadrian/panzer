@@ -48,7 +48,7 @@
 
   // ---------------- Fähigkeiten (eine pro Rang) ----------------
   const ABILITIES = [
-    { id: 'turbo', name: 'Turbo', type: 'aktiv', cd: 11, desc: '3 s lang 60 % schneller.' },
+    { id: 'turbo', name: 'Turbo', type: 'aktiv', cd: 9, desc: '3 s lang 70 % schneller.' },
     { id: 'repair', name: 'Reparatur', type: 'aktiv', cd: 20, desc: 'Heilt 55 Leben über 2 Sekunden.' },
     { id: 'smoke', name: 'Nebelwand', type: 'aktiv', cd: 20, desc: 'Nebelwolke, in der dich niemand sieht (6 s).' },
     { id: 'mine', name: 'Mine', type: 'aktiv', cd: 12, desc: 'Legt eine versteckte Mine (50 Schaden, bis zu 3).' },
@@ -56,15 +56,15 @@
     { id: 'salvo', name: 'Salve', type: 'aktiv', cd: 11, desc: 'Feuert sofort 3 Schüsse hintereinander.' },
     { id: 'dome', name: 'Schutzkuppel', type: 'aktiv', cd: 24, desc: '3 s unverwundbar, du kannst weiter schießen.' },
     { id: 'radar', name: 'Radar', type: 'aktiv', cd: 18, desc: '7 s lang alle Gegner in der Nähe auf der Karte – auch versteckte siehst du.' },
-    { id: 'blink', name: 'Blink', type: 'aktiv', cd: 9, desc: 'Springt ein Stück in Zielrichtung.' },
-    { id: 'shotgun', name: 'Schrotflinte', type: 'aktiv', cd: 7, desc: '6 Schrotkugeln im Fächer, kurze Reichweite.' },
+    { id: 'blink', name: 'Blink', type: 'aktiv', cd: 7, desc: 'Springt ein Stück in Zielrichtung.' },
+    { id: 'shotgun', name: 'Schrotflinte', type: 'aktiv', cd: 7, desc: '7 Schrotkugeln im Fächer (je 15 Schaden), kurze Reichweite.' },
     { id: 'rocket', name: 'Rakete', type: 'aktiv', cd: 12, desc: 'Alle 12 s eine schnelle Rakete: 80 Schaden + große Explosion.' },
-    { id: 'magnet', name: 'Magnetkugeln', type: 'passiv', cd: 0, desc: 'Deine Kugeln lenken spürbar auf Gegner zu.' },
+    { id: 'magnet', name: 'Magnetkugeln', type: 'passiv', cd: 0, desc: 'Deine Kugeln lenken leicht auf nahe Gegner zu, machen dafür 15 % weniger Schaden.' },
     { id: 'invis', name: 'Unsichtbar', type: 'aktiv', cd: 24, desc: '5 s unsichtbar (bis du schießt).' },
-    { id: 'ricochet', name: 'Abpraller', type: 'passiv', cd: 0, desc: 'Kugeln prallen bis zu zweimal von Felsen und Mauern ab.' },
+    { id: 'ricochet', name: 'Abpraller', type: 'passiv', cd: 0, desc: 'Kugeln prallen bis zu dreimal von Steinen und Hügeln ab und werden dabei jedes Mal 30 % stärker.' },
     { id: 'vampire', name: 'Lebensraub', type: 'passiv', cd: 0, desc: '40 % deines Schadens heilen dich.' },
     { id: 'artillery', name: 'Artillerie', type: 'aktiv', cd: 22, desc: 'Schlag auf die Mausposition nach 1,5 s (bis 80 Schaden).' },
-    { id: 'emp', name: 'EMP', type: 'aktiv', cd: 22, desc: 'Gegner in der Nähe 3 s verlangsamt, ohne Fähigkeit, langsamer schießend.' },
+    { id: 'emp', name: 'EMP', type: 'aktiv', cd: 22, desc: 'Gegner im großen Umkreis 3,5 s verlangsamt, ohne Fähigkeit, langsamer schießend.' },
     { id: 'overdrive', name: 'Übermacht', type: 'aktiv', cd: 24, desc: '6 s lang doppelte Feuerrate, 40 % mehr Schaden und schneller.', rank: 17 },
     { id: 'wallhack', name: 'Wallhack + Aimbot', type: 'passiv', cd: 0, desc: 'Gegner durch alles sehen, deine Kugeln fliegen immer zum nächsten Gegner. Nur für die Top 3 Unreal-Spieler.', rank: 17, top3: true },
   ];
