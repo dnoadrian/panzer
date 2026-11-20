@@ -785,10 +785,17 @@ function drawGame(nowMs) {
     paper(ctx, sh, '#e9e4ef', { border: 4, sx: 4, sy: 6, edge: false });
     ctx.restore();
   }
-  for (const tk of tanks) if (tk.wh && vis(tk, 40)) {
-    ctx.save(); ctx.setLineDash([6, 5]); ctx.lineDashOffset = -t * 30; ctx.strokeStyle = '#ff3b2f'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(tk.x, tk.y, 26, 0, 7); ctx.stroke(); ctx.setLineDash([]);
-    ctx.globalAlpha = 0.5; drawTank(ctx, tk.x, tk.y, tk.a, tk.ta, equipOf(tk.i), hashStr(tk.i), { scale: 1.12, t, noHat: true }); ctx.restore();
+  // Wallhack: Eckenbox um jeden Gegner (auch durch Büsche/Nebel)
+  for (const tk of tanks) if (tk.wh && vis(tk, 60)) {
+    ctx.save();
+    if (tk.hid) { ctx.globalAlpha = 0.5; drawTank(ctx, tk.x, tk.y, tk.a, tk.ta, equipOf(tk.i), hashStr(tk.i), { scale: 1.12, t, noHat: true }); ctx.globalAlpha = 1; }
+    const R = 30 + Math.sin(t * 6) * 2, L = 11; ctx.lineCap = 'round';
+    for (const [lw, col] of [[6, '#ffffff'], [3, '#ff3b2f']]) {
+      ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.beginPath();
+      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { ctx.moveTo(tk.x + sx * R, tk.y + sy * (R - L)); ctx.lineTo(tk.x + sx * R, tk.y + sy * R); ctx.lineTo(tk.x + sx * (R - L), tk.y + sy * R); }
+      ctx.stroke();
+    }
+    ctx.restore();
   }
   for (const tk of tanks) {
     if (!vis(tk, 50) || tk.i === me.pid || tk.ph === 2 || (tk.inv && teamOf(tk.i) !== G.myTeam)) continue;

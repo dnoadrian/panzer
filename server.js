@@ -362,8 +362,12 @@ function matchmake(now) {
   queue = queue.filter(q => parties.has(q.party.id) && q.party.members.every(pid => online.has(pid)));
   for (const mode of Object.keys(MODES)) {
     const M = MODES[mode];
-    const entries = queue.filter(q => q.mode === mode);
-    if (!entries.length) continue;
+    // Skill-Matchmaking: nur Partys mit ähnlichem Rang, Spielraum wächst mit der Wartezeit
+    const rankOf = (q) => q.party.members.reduce((s, pid) => s + rankIdx(DB.get(pid)), 0) / q.party.members.length;
+    const all = queue.filter(q => q.mode === mode);
+    if (!all.length) continue;
+    const anchor = all[0], tol = 2 + Math.floor((now - anchor.since) / 4);
+    const entries = all.filter(q => Math.abs(rankOf(q) - rankOf(anchor)) <= tol);
     const humans = entries.reduce((s, q) => s + q.party.members.length, 0);
     if (humans < M.total && now - entries[0].since < MM_WAIT) continue;
     const chosen = [];
@@ -384,7 +388,8 @@ function matchmake(now) {
       for (let k = 0; k < M.size && count < M.total; k++) { team.push(null); count++; }
       teams.push({ list: team });
     }
-    engine.createMatch(teams.map(t => t.list), mode);
+    const skill = Math.round(chosen.reduce((s, q) => s + rankOf(q), 0) / chosen.length);
+    engine.createMatch(teams.map(t => t.list), mode, skill);
     socialDirty = true;
   }
   // Suchstatus an alle Wartenden
