@@ -362,12 +362,21 @@ function buildDeco() {
     for (let k = 0; k < n; k++) puffs.push(C(cx + (k - n / 2) * w * 0.45 + r() * 10, cy + (r() - 0.5) * w * 0.25, w * (0.32 + r() * 0.2)));
     d.clouds.push({ x: cx, y: cy, r: w * 1.4, puffs });
   }
+  // kleine Easter Eggs, gut versteckt zwischen den Grasbüscheln
+  const kinds = ['ente', 'klee', 'pilze', 'schneemann', 'flieger', 'smiley', 'socke'].sort(() => r() - 0.5);
+  d.eggs = [];
+  for (let i = 0; i < 4000 && d.eggs.length < 5; i++) {
+    const x = r() * S, y = r() * S;
+    if (!onP(x, y, 120)) continue;
+    const blocked = [...G.map.mountains, ...G.map.rocks, ...G.map.bushes, ...G.map.teleports].some(o => Math.hypot(o.x - x, o.y - y) < o.r + 70);
+    if (!blocked && d.eggs.every(e => Math.hypot(e.x - x, e.y - y) > 500)) d.eggs.push({ x, y, k: kinds[d.eggs.length], a: r() * 6.28 });
+  }
   G.deco = d;
   // pro Kachel vorsortieren
   const B = new Map(), add = (kind, o, r) => {
     for (let ty = Math.floor((o.y - r) / TILE); ty <= Math.floor((o.y + r) / TILE); ty++)
       for (let tx = Math.floor((o.x - r) / TILE); tx <= Math.floor((o.x + r) / TILE); tx++) {
-        const k = tx + ',' + ty; let b = B.get(k); if (!b) { b = { patches: [], flowers: [], tufts: [], clouds: [], pebbles: [] }; B.set(k, b); } b[kind].push(o);
+        const k = tx + ',' + ty; let b = B.get(k); if (!b) { b = { patches: [], flowers: [], tufts: [], clouds: [], pebbles: [], eggs: [] }; B.set(k, b); } b[kind].push(o);
       }
   };
   for (const o of d.patches) add('patches', o, o.r * 1.4);
@@ -375,6 +384,7 @@ function buildDeco() {
   for (const o of d.tufts) add('tufts', o, 10);
   for (const o of d.pebbles) add('pebbles', o, 6);
   for (const o of d.clouds) add('clouds', o, o.r);
+  for (const o of d.eggs) add('eggs', o, 30);
   G.buckets = B;
 }
 // Lage einer Kachel: ganz innen, ganz außen oder am Rand der Kuppe
@@ -400,7 +410,57 @@ function drawTree(x2, t) {
   paper(x2, [C(t.x - t.r * 0.15, t.y - t.r * 0.25, t.r * 0.55), C(t.x + t.r * 0.2, t.y - t.r * 0.1, t.r * 0.45)], '#4fa847', { border: 0, shadow: false, edge: false });
   paper(x2, C(t.x - t.r * 0.25, t.y - t.r * 0.4, t.r * 0.25), '#62bd56', { border: 0, shadow: false, edge: false });
 }
+// Easter Eggs (nur Deko, klein)
+function drawEgg(x2, e) {
+  x2.save(); x2.translate(e.x, e.y); x2.rotate(e.a * 0.15);
+  switch (e.k) {
+    case 'ente':
+      paper(x2, E(0, 2, 11, 8), '#ffd84a', { border: 2, sx: 1.5, sy: 2.5 }); paper(x2, C(6, -6, 6), '#ffd84a', { border: 2, shadow: false });
+      paper(x2, E(12, -5, 4, 2.2), '#ff8a3c', { border: 1.5, shadow: false }); x2.fillStyle = INK; x2.beginPath(); x2.arc(7.5, -7.5, 1.3, 0, 7); x2.fill(); break;
+    case 'klee':
+      for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + 0.4; paper(x2, [C(Math.cos(a) * 5 - Math.sin(a) * 2, Math.sin(a) * 5 + Math.cos(a) * 2, 3.6), C(Math.cos(a) * 5 + Math.sin(a) * 2, Math.sin(a) * 5 - Math.cos(a) * 2, 3.6)], '#3fa34a', { border: 1.5, shadow: false }); }
+      x2.strokeStyle = '#2f7a35'; x2.lineWidth = 1.6; x2.beginPath(); x2.moveTo(0, 0); x2.quadraticCurveTo(3, 8, 1, 13); x2.stroke(); break;
+    case 'pilze':
+      for (let k = 0; k < 7; k++) { const a = k / 7 * 6.28, px = Math.cos(a) * 16, py = Math.sin(a) * 16; paper(x2, RR(px - 1.5, py - 1, 3, 5, 1), '#f4ead6', { border: 1.2, shadow: false }); paper(x2, E(px, py - 1.5, 4.5, 3.2), '#e8402f', { border: 1.5, sx: 1, sy: 1.5 }); x2.fillStyle = '#fff'; x2.beginPath(); x2.arc(px - 1.5, py - 2.5, 0.9, 0, 7); x2.fill(); }
+      break;
+    case 'schneemann':
+      paper(x2, C(0, 4, 8), '#ffffff', { border: 2, sx: 1.5, sy: 2.5 }); paper(x2, C(0, -6, 5.5), '#ffffff', { border: 2, shadow: false });
+      paper(x2, P([[0, -6], [6, -5], [0, -4.5]]), '#ff8a3c', { border: 1, shadow: false }); x2.fillStyle = INK; x2.beginPath(); x2.arc(-2, -7.5, 0.9, 0, 7); x2.arc(1.5, -7.8, 0.9, 0, 7); x2.fill(); break;
+    case 'flieger':
+      paper(x2, P([[-12, -2], [12, 0], [-12, 6], [-6, 1]]), '#ffffff', { border: 1.8, sx: 2, sy: 4 }); x2.strokeStyle = 'rgba(58,48,70,.35)'; x2.lineWidth = 1; x2.beginPath(); x2.moveTo(-6, 1); x2.lineTo(12, 0); x2.stroke(); break;
+    case 'smiley':
+      for (const [px, py] of [[-6, -5], [6, -5], [-9, 4], [-5, 8], [0, 9.5], [5, 8], [9, 4]]) paper(x2, C(px, py, 2.4), '#d8d2c8', { border: 1.2, sx: 1, sy: 1.5 });
+      break;
+    case 'socke':
+      paper(x2, P([[-4, -10], [4, -10], [4, 3], [10, 5], [10, 10], [-4, 10]]), '#ff5c8a', { border: 2, sx: 1.5, sy: 2.5 }); paper(x2, RR(-4, -10, 8, 4, 1), '#ffffff', { border: 0, shadow: false }); break;
+  }
+  x2.restore();
+}
 function drawWall(x2, w) {
+  if (w.k === 'fence') {
+    const horiz = w.w > w.h, L = horiz ? w.w : w.h, cx = w.x + w.w / 2, cy = w.y + w.h / 2;
+    x2.fillStyle = 'rgba(40,28,60,.16)';
+    if (horiz) x2.fillRect(w.x + 3, cy + 3, w.w, 7); else x2.fillRect(cx + 1, w.y + 5, 7, w.h);
+    for (const off of [-3, 3]) paper(x2, horiz ? RR(w.x, cy + off - 3, w.w, 6, 3) : RR(cx + off - 3, w.y, 6, w.h, 3), '#d39c5e', { border: 2.2, shadow: false });
+    const n = Math.max(2, Math.round(L / 30));
+    for (let k = 0; k <= n; k++) {
+      const p = 5 + (L - 10) * k / n, px = horiz ? w.x + p : cx, py = horiz ? cy : w.y + p;
+      paper(x2, RR(px - 5.5, py - 5.5, 11, 11, 3), '#9c6a37', { border: 2.2, sx: 1.5, sy: 2.5 });
+      paper(x2, RR(px - 2.5, py - 3.5, 5, 3, 1), '#c48a50', { border: 0, shadow: false, edge: false });
+    }
+    return;
+  }
+  if (w.k === 'log') {
+    const horiz = w.w > w.h;
+    paper(x2, RR(w.x, w.y, w.w, w.h, Math.min(w.w, w.h) / 2), '#8f5f33', { border: 3, sx: 3, sy: 5 });
+    x2.strokeStyle = 'rgba(60,35,15,.4)'; x2.lineWidth = 1.4; x2.beginPath();
+    for (let k = 0; k < 3; k++) { if (horiz) { x2.moveTo(w.x + 12, w.y + 5 + k * 5); x2.lineTo(w.x + w.w - 14, w.y + 5 + k * 5); } else { x2.moveTo(w.x + 5 + k * 5, w.y + 12); x2.lineTo(w.x + 5 + k * 5, w.y + w.h - 14); } }
+    x2.stroke();
+    const ex = horiz ? w.x + w.w - w.h / 2 : w.x + w.w / 2, ey = horiz ? w.y + w.h / 2 : w.y + w.h - w.w / 2, er = Math.min(w.w, w.h) / 2 - 1;
+    paper(x2, C(ex, ey, er), '#e2c08d', { border: 2, shadow: false });
+    x2.strokeStyle = 'rgba(140,90,50,.6)'; x2.lineWidth = 1; x2.beginPath(); x2.arc(ex, ey, er * 0.5, 0, 7); x2.stroke();
+    return;
+  }
   if (w.k === 'crate') {
     paper(x2, RR(w.x, w.y, w.w, w.h, 4), '#c98f4f', { border: 3, sx: 3, sy: 5 });
     x2.strokeStyle = '#8a5a2b'; x2.lineWidth = 2.2; x2.beginPath();
@@ -430,7 +490,7 @@ function buildTile(tx, ty) {
   x.scale(s, s); x.translate(-tx * TILE + 1, -ty * TILE + 1);
   const x0 = tx * TILE - 1, y0 = ty * TILE - 1, x1 = x0 + TILE + 2, y1 = y0 + TILE + 2;
   const hit = (o, r) => o.x + r > x0 && o.x - r < x1 && o.y + r > y0 && o.y - r < y1;
-  const bk = G.buckets.get(tx + ',' + ty) || { patches: [], flowers: [], tufts: [], clouds: [], pebbles: [] };
+  const bk = G.buckets.get(tx + ',' + ty) || { patches: [], flowers: [], tufts: [], clouds: [], pebbles: [], eggs: [] };
   const corners = [[x0, y0], [x1, y0], [x0, y1], [x1, y1], [(x0 + x1) / 2, (y0 + y1) / 2]].map(([cx, cy]) => plateauDist(cx, cy));
   const inside = corners.every(d => d > 30), outside = corners.every(d => d < -400);
   if (!inside) {
@@ -454,6 +514,7 @@ function buildTile(tx, ty) {
     paper(x, sh, f.c, { border: 1.2, sx: 1, sy: 1.5, edge: false });
     paper(x, C(f.x, f.y, 1.7), '#f2a03f', { border: 0, shadow: false, edge: false });
   }
+  for (const e of bk.eggs) drawEgg(x, e);
   x.restore();
   if (!inside) {
     x.strokeStyle = '#ffffff'; x.lineWidth = 6; x.lineJoin = 'round'; pathOf(x, [P(G.plat)]); x.stroke();

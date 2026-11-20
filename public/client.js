@@ -20,59 +20,94 @@ let prof = { rp: 0, coins: 0, owned: [], equip: { ...CAT.DEFAULT_EQUIP }, abilit
 let shop = { items: [], nextIn: 0, at: 0 };
 
 // ================= Sound (selbst erzeugt) =================
-let actx = null;
+// Kette: Stimmen -> Bus -> Kompressor -> Lautsprecher, dazu ein leiser Hall-Weg
+let actx = null, master = null, verbIn = null, voices = 0;
 function ac() {
   if (!local.sound) return null;
-  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; } }
+  if (!actx) {
+    try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; }
+    const comp = actx.createDynamicsCompressor();
+    comp.threshold.value = -16; comp.knee.value = 12; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.18;
+    master = actx.createGain(); master.gain.value = 0.9;
+    master.connect(comp).connect(actx.destination);
+    // kurzer Raumhall aus gefiltertem Rauschen
+    const len = Math.floor(actx.sampleRate * 1.3), ir = actx.createBuffer(2, len, actx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2); }
+    const conv = actx.createConvolver(); conv.buffer = ir;
+    const wet = actx.createGain(); wet.gain.value = 0.22;
+    const hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 300;
+    verbIn = actx.createGain(); verbIn.connect(hp).connect(conv).connect(wet).connect(master);
+  }
   if (actx.state === 'suspended') actx.resume();
   return actx;
 }
 const volMul = () => (typeof settings !== 'undefined' ? settings.vol / 100 : 0.8);
-function tone(freq, dur, type = 'square', vol = 0.1, slide = 0, delay = 0) {
+const vary = (f, amt = 0.06) => f * (1 + (Math.random() * 2 - 1) * amt);
+// Hülle mit kurzem Einschwingen (kein Knacksen)
+function env(g, t0, vol, dur, attack) {
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + Math.max(attack + 0.01, dur));
+}
+function out(a, node, o) {
+  node.connect(master);
+  if (o.verb && verbIn) { const s = a.createGain(); s.gain.value = o.verb; node.connect(s).connect(verbIn); }
+}
+function tone(freq, dur, type = 'square', vol = 0.1, slide = 0, delay = 0, o = {}) {
   vol *= volMul();
-  const a = ac(); if (!a || vol <= 0.003) return;
-  const t0 = a.currentTime + delay, o = a.createOscillator(), g = a.createGain();
-  o.type = type; o.frequency.setValueAtTime(freq, t0);
-  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), t0 + dur);
-  g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  o.connect(g).connect(a.destination); o.start(t0); o.stop(t0 + dur + 0.02);
+  const a = ac(); if (!a || vol <= 0.003 || voices > 48) return;
+  const t0 = a.currentTime + delay, osc = a.createOscillator(), g = a.createGain();
+  osc.type = type; osc.frequency.setValueAtTime(freq, t0);
+  if (o.detune) osc.detune.value = o.detune;
+  if (slide) osc.frequency.exponentialRampToValueAtTime(Math.max(25, freq + slide), t0 + dur * (o.slideAt || 1));
+  env(g, t0, vol, dur, o.attack || 0.004);
+  let node = osc;
+  if (o.lp) { const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp; f.Q.value = o.q || 0.7; node = node.connect(f); }
+  node.connect(g); out(a, g, o);
+  voices++; osc.onended = () => { voices--; };
+  osc.start(t0); osc.stop(t0 + dur + 0.03);
 }
 let noiseBuf = null;
-function noise(dur, vol, freq = 1000, delay = 0) {
+function noise(dur, vol, freq = 1000, delay = 0, o = {}) {
   vol *= volMul();
-  const a = ac(); if (!a || vol <= 0.003) return;
-  if (!noiseBuf) { noiseBuf = a.createBuffer(1, a.sampleRate, a.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+  const a = ac(); if (!a || vol <= 0.003 || voices > 48) return;
+  if (!noiseBuf) { noiseBuf = a.createBuffer(1, a.sampleRate * 2, a.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
   const t0 = a.currentTime + delay, s = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
-  s.buffer = noiseBuf; f.type = 'lowpass'; f.frequency.value = freq;
-  g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  s.connect(f).connect(g).connect(a.destination); s.start(t0); s.stop(t0 + dur + 0.02);
+  s.buffer = noiseBuf; f.type = o.type || 'lowpass'; f.frequency.setValueAtTime(freq, t0); f.Q.value = o.q || (o.type === 'bandpass' ? 1.4 : 0.7);
+  if (o.to) f.frequency.exponentialRampToValueAtTime(o.to, t0 + dur);
+  env(g, t0, vol, dur, o.attack || 0.003);
+  s.connect(f).connect(g); out(a, g, o);
+  voices++; s.onended = () => { voices--; };
+  s.start(t0, Math.random() * 1.5); s.stop(t0 + dur + 0.03);
 }
 const sfx = {
-  shot: (v) => { noise(0.12, 0.2 * v, 1100); tone(140, 0.1, 'sine', 0.22 * v, -80); },
-  bigshot: (v) => { noise(0.25, 0.3 * v, 700); tone(90, 0.25, 'sine', 0.3 * v, -40); },
-  hit: () => { tone(2200, 0.045, 'triangle', 0.16, -300); tone(3300, 0.03, 'sine', 0.08); noise(0.03, 0.08, 6000); },
-  kill: () => { tone(160, 0.18, 'sine', 0.3, -60); noise(0.08, 0.15, 3000); tone(1320, 0.09, 'triangle', 0.14, 0, 0.06); tone(1760, 0.22, 'triangle', 0.14, 0, 0.13); },
-  hurt: () => { tone(170, 0.18, 'sawtooth', 0.12, -90); noise(0.1, 0.12, 600); },
-  boom: (v) => { noise(0.7, 0.45 * v, 380); tone(70, 0.5, 'sine', 0.35 * v, -40); },
-  bush: (v) => noise(0.12, 0.16 * v, 2600),
-  dirt: (v) => noise(0.08, 0.12 * v, 500),
-  wood: (v) => { noise(0.06, 0.14 * v, 1400); tone(320, 0.05, 'triangle', 0.08 * v); },
-  pick: () => { tone(520, 0.08, 'triangle', 0.12); tone(780, 0.1, 'triangle', 0.12, 0, 0.07); },
-  zone: () => { tone(330, 0.35, 'sine', 0.1); tone(247, 0.45, 'sine', 0.1, 0, 0.3); },
-  tick: () => tone(880, 0.05, 'sine', 0.06),
-  go: () => { tone(523, 0.1, 'square', 0.08); tone(784, 0.25, 'square', 0.08, 0, 0.1); },
-  win: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.25, 'triangle', 0.12, 0, i * 0.13)); },
-  click: () => tone(620, 0.04, 'triangle', 0.07),
-  block: () => { tone(1500, 0.07, 'triangle', 0.09); tone(1100, 0.1, 'sine', 0.07, 0, 0.03); },
-  blockOn: () => tone(400, 0.18, 'sine', 0.1, 500),
-  jump: () => { noise(0.5, 0.15, 1800); tone(700, 0.4, 'sine', 0.08, -400); },
-  land: () => { noise(0.25, 0.3, 300); tone(90, 0.2, 'sine', 0.25, -40); },
-  fall: (v) => { tone(1100, 1.0, 'sine', 0.12 * v, -900); },
-  heal: () => { tone(520, 0.12, 'triangle', 0.1); tone(660, 0.12, 'triangle', 0.1, 0, 0.1); tone(880, 0.2, 'triangle', 0.1, 0, 0.2); },
-  ability: () => { tone(440, 0.08, 'triangle', 0.1, 400); tone(880, 0.12, 'sine', 0.08, 0, 0.06); },
-  heart: () => { tone(60, 0.12, 'sine', 0.35); tone(55, 0.14, 'sine', 0.28, 0, 0.18); },
-  buy: () => { [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.14, 'triangle', 0.1, 0, i * 0.07)); noise(0.2, 0.08, 5000, 0.25); },
-  emp: () => { tone(200, 0.5, 'sawtooth', 0.1, 900); noise(0.3, 0.12, 4000); },
+  // Papier-Kanone: tiefer Stoß, Knall, kurzes Klicken
+  shot: (v = 1) => { const p = vary(1); tone(150 * p, 0.16, 'sine', 0.32 * v, -105); noise(0.1, 0.24 * v, 2200 * p, 0, { to: 500 }); tone(330 * p, 0.05, 'triangle', 0.08 * v, -150); noise(0.025, 0.08 * v, 5000, 0, { type: 'highpass' }); },
+  bigshot: (v = 1) => { tone(110, 0.3, 'sine', 0.35 * v, -60); noise(0.45, 0.28 * v, 500, 0, { type: 'bandpass', to: 2600, q: 0.9, verb: 0.3 }); noise(0.12, 0.2 * v, 1500); },
+  hit: () => { tone(vary(1900, 0.03), 0.05, 'triangle', 0.15); tone(2850, 0.07, 'sine', 0.08, 0, 0.025); noise(0.03, 0.06, 7000, 0, { type: 'highpass' }); },
+  kill: () => { tone(120, 0.22, 'sine', 0.35, -70); noise(0.1, 0.16, 3000); [1319, 1661, 1976].forEach((f, i) => tone(f, 0.28, 'triangle', 0.1, 0, 0.05 + i * 0.07, { verb: 0.5 })); },
+  hurt: () => { tone(190, 0.2, 'sawtooth', 0.1, -110, 0, { lp: 900 }); noise(0.14, 0.18, 700, 0, { to: 200 }); },
+  boom: (v = 1) => { tone(62, 0.65, 'sine', 0.42 * v, -32); noise(0.9, 0.42 * v, 1200, 0, { to: 160, verb: 0.35 }); for (let i = 0; i < 3; i++) noise(0.04, 0.12 * v, 4500, 0.05 + i * 0.07 + Math.random() * 0.04, { type: 'highpass' }); },
+  bush: (v = 1) => { for (let i = 0; i < 3; i++) noise(0.07, 0.11 * v, vary(3200, 0.2), i * 0.045, { type: 'bandpass', q: 0.8 }); },
+  dirt: (v = 1) => { noise(0.1, 0.15 * v, 600, 0, { to: 180 }); },
+  wood: (v = 1) => { tone(vary(240, 0.08), 0.07, 'triangle', 0.13 * v, -60); noise(0.05, 0.12 * v, 1300, 0, { type: 'bandpass', q: 2 }); },
+  pick: () => { tone(660, 0.08, 'triangle', 0.1); tone(990, 0.12, 'triangle', 0.1, 0, 0.06, { verb: 0.4 }); },
+  zone: () => { [110, 110 * 1.007, 164.8].forEach((f) => tone(f, 1.3, 'sawtooth', 0.06, -20, 0, { lp: 420, attack: 0.25, verb: 0.5 })); tone(880, 0.25, 'sine', 0.05, -200, 0.1); },
+  tick: () => tone(1250, 0.05, 'sine', 0.07),
+  go: () => { [392, 494, 587].forEach((f) => tone(f, 0.14, 'sawtooth', 0.05, 0, 0, { lp: 1800 })); [523, 659, 784].forEach((f) => tone(f, 0.4, 'sawtooth', 0.05, 0, 0.14, { lp: 2200, verb: 0.4 })); },
+  win: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.3, 'triangle', 0.12, 0, i * 0.12, { verb: 0.5 })); [523, 659, 784, 1047].forEach((f) => tone(f, 1.2, 'sawtooth', 0.035, 0, 0.5, { lp: 1600, attack: 0.05, verb: 0.6 })); },
+  click: () => { tone(vary(880, 0.04), 0.05, 'sine', 0.09, -280); noise(0.015, 0.04, 6000, 0, { type: 'highpass' }); },
+  deny: () => { tone(180, 0.16, 'square', 0.06, -30, 0, { lp: 700 }); tone(140, 0.2, 'square', 0.06, -20, 0.12, { lp: 700 }); },
+  block: () => { [1230, 1790, 2470].forEach((f, i) => tone(vary(f, 0.02), 0.28 - i * 0.06, 'sine', 0.08, 0, 0, { verb: 0.3 })); noise(0.03, 0.1, 5000, 0, { type: 'highpass' }); },
+  blockOn: () => { tone(300, 0.22, 'sine', 0.1, 600); tone(600, 0.25, 'triangle', 0.04, 900, 0.03, { verb: 0.3 }); },
+  jump: () => { noise(0.6, 0.16, 600, 0, { type: 'bandpass', to: 2400, q: 0.7 }); tone(700, 0.4, 'sine', 0.06, -400); },
+  land: () => { noise(0.3, 0.32, 900, 0, { to: 150 }); tone(95, 0.22, 'sine', 0.3, -50); },
+  fall: (v = 1) => { tone(1300, 1.1, 'sine', 0.11 * v, -1050, 0, { verb: 0.4 }); },
+  heal: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.18, 'triangle', 0.08, 0, i * 0.07, { verb: 0.5 })); noise(0.3, 0.04, 8000, 0.1, { type: 'highpass' }); },
+  ability: () => { tone(380, 0.22, 'sine', 0.1, 900); tone(1200, 0.18, 'triangle', 0.06, 400, 0.08, { verb: 0.5 }); noise(0.2, 0.05, 6000, 0.05, { type: 'highpass' }); },
+  heart: () => { tone(62, 0.12, 'sine', 0.38); tone(55, 0.14, 'sine', 0.3, 0, 0.18); },
+  buy: () => { [1568, 2093, 2637].forEach((f, i) => tone(f, 0.16, 'triangle', 0.09, 0, i * 0.06)); tone(784, 0.5, 'sine', 0.08, 0, 0.18, { verb: 0.6 }); noise(0.2, 0.06, 7000, 0.2, { type: 'highpass' }); },
+  emp: () => { tone(220, 0.5, 'sawtooth', 0.09, 1200, 0, { lp: 3000 }); noise(0.35, 0.12, 2500, 0, { type: 'bandpass', to: 6000, verb: 0.3 }); },
 };
 
 // ================= Verbindung =================
@@ -443,7 +478,7 @@ function renderShop() {
     if (owned) b.textContent = 'Gekauft';
     else { b.innerHTML = coinSvg(); b.append(el('b', '', String(it.price)), el('span', '', 'Kaufen')); }
     b.disabled = owned;
-    b.onclick = (e) => { e.stopPropagation(); if (prof.coins < it.price) { toast('Dafür hast du nicht genug Zahnräder.'); return; } send({ t: 'buy', id }); };
+    b.onclick = (e) => { e.stopPropagation(); if (prof.coins < it.price) { toast('Dafür hast du nicht genug Zahnräder.'); sfx.deny(); return; } send({ t: 'buy', id }); };
     d.appendChild(b);
     grid.appendChild(d);
     shopRO.observe(c);
@@ -693,6 +728,84 @@ function buildStageBg(w, h, dpr) {
   }
   return c;
 }
+// ---------- Lobby: mehrere Papier-Ebenen mit Parallaxe ----------
+const PAR = 30; // so weit (px) dürfen sich die Ebenen höchstens verschieben
+let stageLayers = null, stageLayersKey = '', stagePar = 0, stageMouseIn = false;
+function layerCanvas(w, h, dpr) { const c = document.createElement('canvas'); c.width = Math.ceil((w + PAR * 2) * dpr); c.height = Math.ceil(h * dpr); const x = c.getContext('2d'); x.scale(dpr, dpr); x.translate(PAR, 0); return [c, x]; }
+function ridge(x, w, h, yb, hgt, col, seed, n, snow, shadowCol) {
+  const pts = [[-PAR - 20, h]], rr = rng(seed);
+  for (let i = 0; i <= n; i++) { pts.push([(w + PAR * 2) * i / n - PAR + (rr() - 0.5) * 40, yb - hgt * (0.55 + rr() * 0.45)]); pts.push([(w + PAR * 2) * (i + 0.5) / n - PAR, yb - hgt * (0.12 + rr() * 0.25)]); }
+  pts.push([w + PAR + 20, h]);
+  paper(x, P(pts), col, { border: 4, sx: 0, sy: -5, shadowCol: shadowCol || 'rgba(40,60,110,.12)' });
+  if (snow) for (let i = 1; i < pts.length - 1; i += 2) { const [px, py] = pts[i], s = Math.min(1.4, hgt / 160); paper(x, P([[px, py], [px - 20 * s, py + 22 * s], [px - 8 * s, py + 16 * s], [px + 2 * s, py + 25 * s], [px + 18 * s, py + 18 * s]]), '#ffffff', { border: 0, shadow: false }); }
+  return pts;
+}
+function buildStageLayers(w, h, dpr) {
+  const hz = h * 0.58, L = { hz };
+  // 0: Himmel
+  { const c = document.createElement('canvas'); c.width = Math.ceil(w * dpr); c.height = Math.ceil(h * dpr); const x = c.getContext('2d'); x.scale(dpr, dpr);
+    const g = x.createLinearGradient(0, 0, 0, hz); g.addColorStop(0, '#6fbcef'); g.addColorStop(0.7, '#bfe5fa'); g.addColorStop(1, '#e4f5fc'); x.fillStyle = g; x.fillRect(0, 0, w, h);
+    L.sky = c; }
+  // 1: ferne blaue Gipfel
+  { const [c, x] = layerCanvas(w, h, dpr); ridge(x, w, h, hz - h * 0.04, h * 0.36, '#c6d3ef', 77, 7, true, 'rgba(40,60,110,.08)'); L.far = c; }
+  // 2: Berge mit Schnee
+  { const [c, x] = layerCanvas(w, h, dpr); ridge(x, w, h, hz, h * 0.28, '#a9badf', 41, 9, true); L.mid = c; }
+  // 3: sandige Hügel
+  { const [c, x] = layerCanvas(w, h, dpr); ridge(x, w, h, hz + 8, h * 0.14, '#d9c69b', 31, 11, false);
+    // kleine Felsen auf den Hügeln
+    const rr = rng(5); for (let i = 0; i < 6; i++) { const px = rr() * w, py = hz + 2 + rr() * 6; paper(x, B(blobPts(px, py, 6 + rr() * 6, 7, i, 0.15)), '#c2b49a', { border: 2, sx: 1, sy: 2 }); }
+    L.hills = c; }
+  // 4: grüne Hügelwelle mit kleinen Büschen
+  { const [c, x] = layerCanvas(w, h, dpr); const yb = hz + 26, pts = [[-PAR - 20, h]];
+    for (let i = 0; i <= 60; i++) { const px = -PAR + (w + PAR * 2) * i / 60; pts.push([px, yb - 10 - Math.sin(i * 0.45) * 9 - Math.sin(i * 0.17 + 1) * 12]); }
+    pts.push([w + PAR + 20, h]);
+    paper(x, P(pts), '#a6dd84', { border: 4, sx: 0, sy: -4, shadowCol: 'rgba(40,80,30,.12)' });
+    const rr = rng(12);
+    for (let i = 0; i < 14; i++) { const px = rr() * w, k = Math.round((px + PAR) / (w + PAR * 2) * 60), py = (pts[k + 1] || pts[1])[1] + 6; paper(x, [C(px - 7, py, 8), C(px + 5, py - 3, 9), C(px + 13, py + 1, 6)], i % 3 ? '#5fae47' : '#4f9a3c', { border: 2.5, sx: 1.5, sy: 2.5 }); }
+    L.green = c; }
+  // 5: Wiese vorne (bleibt stehen, darauf stehen die Plattformen)
+  { const c = document.createElement('canvas'); c.width = Math.ceil(w * dpr); c.height = Math.ceil(h * dpr); const x = c.getContext('2d'); x.scale(dpr, dpr);
+    const top = hz + 34, gg = x.createLinearGradient(0, top, 0, h); gg.addColorStop(0, '#9fdc7a'); gg.addColorStop(1, '#77c55a');
+    const pts = [[-20, h]]; for (let i = 0; i <= 40; i++) pts.push([w * i / 40, top + Math.sin(i * 0.6) * 4]); pts.push([w + 20, h]);
+    paper(x, P(pts), gg, { border: 4, sx: 0, sy: -5, shadowCol: 'rgba(40,80,30,.18)' });
+    x.save(); pathOf(x, [P(pts)]); x.clip();
+    x.fillStyle = fiberPattern(x); x.globalAlpha = 0.25; x.fillRect(0, 0, w, h); x.globalAlpha = 1;
+    const rr = rng(9);
+    // helle Flecken
+    for (let i = 0; i < 9; i++) { x.fillStyle = 'rgba(200,245,160,.35)'; pathOf(x, [B(blobPts(rr() * w, top + 30 + rr() * (h - top), 40 + rr() * 90, 9, i, 0.3))]); x.fill(); }
+    x.strokeStyle = '#5fae47'; x.lineWidth = 2; x.lineCap = 'round'; x.beginPath();
+    for (let i = 0; i < w * h / 3200; i++) { const gx = rr() * w, gy = top + 14 + rr() * (h - top - 14); x.moveTo(gx - 4, gy); x.lineTo(gx - 2, gy - 7); x.moveTo(gx, gy); x.lineTo(gx + 1, gy - 9); x.moveTo(gx + 4, gy); x.lineTo(gx + 3, gy - 6); }
+    x.stroke();
+    for (let i = 0; i < w * h / 22000; i++) {
+      const gx = rr() * w, gy = top + 22 + rr() * (h - top - 22), col = ['#ffffff', '#ffd25c', '#ff9ab0', '#b9a6ff'][i % 4];
+      const sh = []; for (let k = 0; k < 5; k++) { const a = k / 5 * 6.28; sh.push(C(gx + Math.cos(a) * 3.4, gy + Math.sin(a) * 3.4, 2.6)); }
+      paper(x, sh, col, { border: 1.2, sx: 1, sy: 1.5, edge: false });
+      paper(x, C(gx, gy, 1.8), '#f2a03f', { border: 0, shadow: false, edge: false });
+    }
+    x.restore();
+    L.ground = c; }
+  // fliegende Blütenblätter vorne
+  const rr = rng(3); L.petals = Array.from({ length: Math.round(w / 70) }, () => ({ x: rr() * w, y: rr() * h, s: 0.6 + rr() * 0.8, ph: rr() * 6.28, col: ['#ffffff', '#ffb3cc', '#ffe28a'][Math.floor(rr() * 3)] }));
+  return L;
+}
+function drawLayer(c, par, f, w, h) { sctx.drawImage(c, -PAR - par * PAR * f, 0, w + PAR * 2, h); }
+// Heißluftballon aus Papier
+function drawBalloon(c2, x, y, s, t) {
+  c2.save(); c2.translate(x, y); c2.rotate(Math.sin(t * 0.7) * 0.05); c2.scale(s, s);
+  c2.strokeStyle = INK; c2.lineWidth = 1.5; c2.beginPath(); c2.moveTo(-10, 20); c2.lineTo(-6, 34); c2.moveTo(10, 20); c2.lineTo(6, 34); c2.stroke();
+  paper(c2, B([[0, -30], [24, -12], [16, 14], [8, 22], [-8, 22], [-16, 14], [-24, -12]]), '#ff6b5a', { border: 3, sx: 3, sy: 5, shadowCol: 'rgba(60,110,170,.2)' });
+  paper(c2, B([[0, -29], [9, -12], [6, 14], [3, 21], [-3, 21], [-6, 14], [-9, -12]]), '#ffd84a', { border: 0, shadow: false, edge: false });
+  paper(c2, RR(-7, 33, 14, 10, 2), '#c98f4f', { border: 2.5, shadow: false });
+  c2.restore();
+}
+function drawBirds(c2, w, h, t) {
+  c2.strokeStyle = 'rgba(58,48,70,.55)'; c2.lineWidth = 2; c2.lineCap = 'round'; c2.beginPath();
+  for (let g = 0; g < 2; g++) {
+    const span = w + 300, bx = ((t * (22 + g * 9) + g * 600) % span) - 150, by = h * (0.2 + g * 0.1) + Math.sin(t * 0.5 + g) * 10;
+    for (let i = 0; i < 4; i++) { const px = bx - i * 18 - (i % 2) * 6, py = by + i * 7 * (i % 2 ? 1 : -0.4), f = Math.sin(t * 9 + i + g) * 3; c2.moveTo(px - 7, py - 2 - f); c2.quadraticCurveTo(px - 3, py - 4, px, py); c2.quadraticCurveTo(px + 3, py - 4, px + 7, py - 2 - f); }
+  }
+  c2.stroke();
+}
 function drawSun(c2, sx, sy, sr, t) {
   c2.save(); c2.translate(sx, sy); c2.rotate(t * 0.15);
   const rays = []; for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2, rr = i % 2 ? sr * 1.15 : sr * 1.6; rays.push([Math.cos(a) * rr, Math.sin(a) * rr]); }
@@ -705,15 +818,24 @@ function drawSun(c2, sx, sy, sr, t) {
 function drawStage(time) {
   const { w, h } = fitCanvas(stage, sctx);
   const dpr = devicePixelRatio || 1, key = `${w}x${h}x${dpr}`;
-  if (stageBgKey !== key) { stageBg = buildStageBg(w, h, dpr); stageBgKey = key; }
-  sctx.drawImage(stageBg, 0, 0, w, h);
-  const t = time / 1000, hz = h * 0.58;
-  drawSun(sctx, w * 0.86, h * 0.16, Math.min(w, h) * 0.06, t);
-  cloudSprites.forEach((cs, i) => {
-    const farL = i < 3, speed = farL ? 6 : 13, span = w + cs.w * 2;
-    const cx = ((t * speed + i * 397) % span) - cs.w, cy = h * (farL ? 0.06 + i * 0.07 : 0.04 + (i - 3) * 0.08) + Math.sin(t * 0.4 + i) * 3;
-    sctx.drawImage(cs.c, cx, cy, cs.w * (farL ? 0.8 : 1), cs.h * (farL ? 0.8 : 1));
-  });
+  if (stageLayersKey !== key) { stageLayers = buildStageLayers(w, h, dpr); stageLayersKey = key; }
+  const Ly = stageLayers, t = time / 1000, hz = h * 0.58;
+  stagePar += ((stageMouseIn ? clamp(mouse.x / w * 2 - 1, -1, 1) : 0) - stagePar) * 0.06;
+  const par = stagePar;
+  sctx.drawImage(Ly.sky, 0, 0, w, h);
+  drawSun(sctx, w * 0.86 - par * 4, h * 0.16, Math.min(w, h) * 0.06, t);
+  const cloud = (i) => { const cs = cloudSprites[i], farL = i < 3, speed = farL ? 6 : 13, span = w + cs.w * 2;
+    const cx = ((t * speed + i * 397) % span) - cs.w - par * (farL ? 6 : 14), cy = h * (farL ? 0.06 + i * 0.07 : 0.04 + (i - 3) * 0.08) + Math.sin(t * 0.4 + i) * 3;
+    sctx.drawImage(cs.c, cx, cy, cs.w * (farL ? 0.8 : 1), cs.h * (farL ? 0.8 : 1)); };
+  for (let i = 0; i < 3; i++) cloud(i);
+  drawLayer(Ly.far, par, 0.15, w, h);
+  drawBirds(sctx, w, h, t);
+  drawBalloon(sctx, ((t * 9 + w * 0.3) % (w + 200)) - 100 - par * 8, h * 0.22 + Math.sin(t * 0.6) * 8, Math.min(1.3, h / 600), t);
+  drawLayer(Ly.mid, par, 0.3, w, h);
+  for (let i = 3; i < cloudSprites.length; i++) cloud(i);
+  drawLayer(Ly.hills, par, 0.5, w, h);
+  drawLayer(Ly.green, par, 0.7, w, h);
+  sctx.drawImage(Ly.ground, 0, 0, w, h);
   // Party auf Papier-Plattformen (Rohre folgen NICHT der Maus)
   const members = party ? [...party.members].sort((a, b) => (a.pid === me.pid ? -1 : b.pid === me.pid ? 1 : 0)) : [];
   const xs = [0.38, 0.62, 0.16, 0.84];
@@ -767,9 +889,15 @@ function drawStage(time) {
       stageSlots.push({ x, y: y - sc * 8, r: sc * 34 });
     }
   }
+  for (const p of Ly.petals) {
+    const px = ((p.x + t * 18 * p.s) % (w + 40)) - 20 - par * 20 * p.s, py = ((p.y + t * 12 * p.s) % (h + 40)) - 20 + Math.sin(t * 1.3 + p.ph) * 10;
+    sctx.save(); sctx.translate(px, py); sctx.rotate(t * 1.5 * p.s + p.ph); sctx.scale(1, Math.abs(Math.sin(t * 2 + p.ph)) * 0.7 + 0.3);
+    sctx.fillStyle = p.col; sctx.globalAlpha = 0.85; sctx.beginPath(); sctx.ellipse(0, 0, 4 * p.s + 1, 2.4 * p.s + 0.6, 0, 0, 7); sctx.fill(); sctx.restore();
+  }
   stage.style.cursor = stageSlots.some(s => Math.hypot(mouse.x - s.x, mouse.y - s.y) < s.r) ? 'pointer' : 'default';
 }
-stage.addEventListener('mousemove', (e) => { const r = stage.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; });
+stage.addEventListener('mouseleave', () => { stageMouseIn = false; });
+stage.addEventListener('mousemove', (e) => { stageMouseIn = true; const r = stage.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; });
 stage.addEventListener('click', () => {
   if (stageSlots.some(s => Math.hypot(mouse.x - s.x, mouse.y - s.y) < s.r)) { $('drawer').classList.add('open'); sfx.click(); setTimeout(() => $('addName').focus(), 200); }
 });
