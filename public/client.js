@@ -232,12 +232,12 @@ function previewItem(cv, it, w, h) {
   cv.width = w * s; cv.height = h * s;
   x.setTransform(s, 0, 0, s, 0, 0); x.clearRect(0, 0, w, h);
   const eq = { ...prof.equip };
-  if (it.cat === 'skin') { drawTank(x, w / 2, h / 2 + 4, -0.35, -0.8, { skin: it.id, hat: 'keiner' }, hashStr(it.id), { scale: Math.min(w, h) / 50 }); }
+  if (it.cat === 'skin') { drawTank(x, w / 2 + Math.min(w, h) * 0.07, h / 2 + Math.min(w, h) * 0.05, -0.35, -0.8, { skin: it.id, hat: 'keiner' }, hashStr(it.id), { scale: Math.min(w, h) / 50 }); }
   else if (it.cat === 'hat') { drawTank(x, w / 2, h / 2 + 6, -0.35, -1.2, { skin: eq.skin, hat: it.id }, 7, { scale: Math.min(w, h) / 40 }); }
   else if (it.cat === 'tracer') {
     paper(x, RR(8, 8, w - 16, h - 16, 12), '#e9f3d8', { border: 3, sx: 2, sy: 3 });
     const sc = Math.min(w, h) / 34;
-    x.save(); x.translate(w * 0.68, h / 2); x.scale(sc, sc);
+    x.save(); x.translate(w / 2 + 20 * sc, h / 2); x.scale(sc, sc); // Spur + Kugel zusammen mittig
     drawTracer(x, it.id, 0, 0, 0.1, '#f2b705', 1.3, 0);
     x.fillStyle = INK; x.beginPath(); x.ellipse(0, 0, 7.5, 5, 0.1, 0, 7); x.fill(); x.fillStyle = '#f2b705'; x.beginPath(); x.ellipse(0, 0, 5, 3, 0.1, 0, 7); x.fill();
     x.restore();
@@ -317,9 +317,11 @@ function renderShop() {
     const d = el('div', 'item' + (owned ? ' on' : ''));
     const c = document.createElement('canvas'); previewItem(c, it, 200, 130);
     d.append(el('div', 'cat', CAT.CATS[it.cat]), c, el('div', 'n', it.name));
-    const pr = el('div', 'price'); pr.innerHTML = coinSvg(); pr.appendChild(document.createTextNode(it.price)); d.appendChild(pr);
-    const b = el('button', 'btn small ' + (owned ? '' : 'yellow'), owned ? 'Gekauft' : 'Kaufen');
-    b.disabled = owned; b.style.marginTop = '8px';
+    // Preis und Kaufen in einem zentrierten Knopf
+    const b = el('button', 'btn buy ' + (owned ? '' : 'yellow'));
+    if (owned) b.textContent = 'Gekauft';
+    else { b.innerHTML = coinSvg(); b.append(el('b', '', String(it.price)), el('span', '', 'Kaufen')); }
+    b.disabled = owned;
     b.onclick = (e) => { e.stopPropagation(); if (prof.coins < it.price) { toast('Dafür hast du nicht genug Zahnräder.'); return; } send({ t: 'buy', id }); };
     d.appendChild(b);
     grid.appendChild(d);
