@@ -2,7 +2,7 @@
 'use strict';
 
 const DEFAULT_SETTINGS = {
-  sens: 1, lock: true, vol: 80, quality: 'hoch', zoom: 1, shake: true, fps: true,
+  sens: 1, lock: true, vol: 80, quality: 'hoch', zoom: 1, shake: true, fps: true, fpsLimit: 0,
   cross: '#2b2620', crossSize: 1,
   keys: { up: 'w', down: 's', left: 'a', right: 'd', fire: ' ', block: 'shift', jump: ' ', spec: 'q', map: 'm' },
 };
@@ -35,7 +35,7 @@ let waitingKey = null;
 function openSettings() {
   renderSettings();
   $('settings').classList.remove('hidden');
-  $('btnSetLeave').classList.toggle('hidden', !inGame);
+  $('btnSetLeave').classList.add('hidden');
   if (document.pointerLockElement) document.exitPointerLock();
   for (const k in keys) keys[k] = false;
 }
@@ -54,6 +54,7 @@ function renderSettings() {
   $('sZoom').value = settings.zoom; $('sZoomV').textContent = Math.round(settings.zoom * 100) + '%';
   $('sShake').checked = settings.shake;
   $('sFps').checked = settings.fps;
+  $('sFpsLimit').value = String(settings.fpsLimit);
   $('sCrossSize').value = settings.crossSize;
   const sw = $('sCross'); sw.innerHTML = '';
   for (const c of CROSS_COLORS) {
@@ -104,6 +105,7 @@ $('sQual').onchange = (e) => { settings.quality = e.target.value; saveSettings()
 $('sZoom').oninput = (e) => { settings.zoom = +e.target.value; $('sZoomV').textContent = Math.round(settings.zoom * 100) + '%'; saveSettings(); };
 $('sShake').onchange = (e) => { settings.shake = e.target.checked; saveSettings(); };
 $('sFps').onchange = (e) => { settings.fps = e.target.checked; saveSettings(); };
+$('sFpsLimit').onchange = (e) => { settings.fpsLimit = +e.target.value; saveSettings(); };
 $('sCrossSize').oninput = (e) => { settings.crossSize = +e.target.value; saveSettings(); drawCrossPreview(); };
 $('btnSetClose').onclick = closeSettings;
 $('btnSetDone').onclick = () => { closeSettings(); sfx.click(); };
@@ -113,7 +115,7 @@ $('btnSetReset').onclick = () => {
   profile.sound = snd;
   saveSettings(); renderSettings(); toast('Einstellungen zurückgesetzt');
 };
-$('btnSetLeave').onclick = () => { closeSettings(); send({ t: 'toLobby' }); };
+$('btnSetLeave').onclick = () => { closeSettings(); leaveGame(); };
 $('btnDelete').onclick = () => {
   if (!confirm('Konto wirklich löschen? Name, Rang, Freunde und Skins sind danach weg.')) return;
   send({ t: 'deleteAccount' });
@@ -140,11 +142,38 @@ addEventListener('keydown', (e) => {
   renderSettings();
 }, true);
 
-// Esc im Spiel öffnet die Einstellungen
+// ---------- Spielmenü wie in Fortnite (Esc oder Knopf oben links) ----------
+let leaveArmed = false;
+const menuOpen = () => !$('gameMenu').classList.contains('hidden');
+function openMenu() {
+  if (document.pointerLockElement) document.exitPointerLock();
+  for (const k in keys) keys[k] = false;
+  gm.down = gm.rdown = false;
+  leaveArmed = false;
+  $('mLeave').textContent = 'SPIEL VERLASSEN';
+  const alive = G.cur && G.cur.me.alive;
+  $('mHint').textContent = alive ? 'Das Spiel läuft weiter, während das Menü offen ist.' : 'Esc schließt das Menü';
+  $('gameMenu').classList.remove('hidden');
+}
+function closeMenu() { $('gameMenu').classList.add('hidden'); }
+function leaveGame() {
+  closeMenu();
+  if (document.pointerLockElement) document.exitPointerLock();
+  send({ t: 'toLobby' });
+}
+$('btnMenu').onclick = (e) => { e.stopPropagation(); sfx.click(); menuOpen() ? closeMenu() : openMenu(); };
+$('mResume').onclick = () => { sfx.click(); closeMenu(); };
+$('mSettings').onclick = () => { sfx.click(); closeMenu(); openSettings(); };
+$('mLeave').onclick = () => {
+  sfx.click();
+  const alive = G.cur && G.cur.me.alive;
+  if (alive && !leaveArmed) { leaveArmed = true; $('mLeave').textContent = 'WIRKLICH? (du scheidest aus)'; return; }
+  leaveGame();
+};
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || waitingKey) return;
-  if (settingsOpen()) closeSettings();
-  else if (screen === 'game') openSettings();
+  if (settingsOpen()) { closeSettings(); if (screen === 'game') openMenu(); }
+  else if (screen === 'game') { menuOpen() ? closeMenu() : openMenu(); }
 });
 
 // Einstellungen-Tab in der Lobby

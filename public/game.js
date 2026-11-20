@@ -27,6 +27,7 @@ resetG();
 
 function startGame(m) {
   resetG();
+  closeMenu();
   $('bigmap').classList.add('hidden');
   G.map = m.map; G.maxHp = m.maxHp; G.bushMax = 1; G.bus = m.bus; G.blockCd = m.blockCd;
   { // Umriss der Bergkuppe als Punkte + Wolken tief unten
@@ -55,6 +56,7 @@ function startGame(m) {
 function exitGame() {
   if (!inGame) return;
   inGame = false;
+  closeMenu(); closeSettings();
   if (document.pointerLockElement) document.exitPointerLock();
   for (const tm of G.tutTimers) clearTimeout(tm);
   resetG();
@@ -291,7 +293,7 @@ function onResult(m) {
 
 // ---------- Eingabe ----------
 addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || settingsOpen()) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || settingsOpen() || menuOpen()) return;
   const k = e.key.toLowerCase();
   keys[k] = true;
   if (inGame && (['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k) || Object.values(settings.keys).includes(k))) e.preventDefault();
@@ -331,7 +333,7 @@ function screenToWorld(sx, sy) { const z = G.cam.z; return { x: G.cam.x + (sx - 
 setInterval(() => {
   const s = G.snaps[G.snaps.length - 1];
   if (!inGame || !s || !s.me.alive) return;
-  if (settingsOpen()) { send({ t: 'input', dx: 0, dy: 0, aim: G.aim, fire: false, block: false }); return; }
+  if (settingsOpen() || menuOpen()) { send({ t: 'input', dx: 0, dy: 0, aim: G.aim, fire: false, block: false }); return; }
   const { dx, dy } = readMove(), K = settings.keys;
   const fire = gm.down || !!keys[K.fire] || (s.me.ph === 1 && !!keys[K.jump]);
   send({ t: 'input', dx, dy, aim: G.aim, fire, block: !!(gm.rdown || keys[K.block]) });
@@ -1087,13 +1089,35 @@ function drawGame(nowMs) {
 }
 
 // ================= Hauptschleife =================
-function loop(time) {
-  requestAnimationFrame(loop);
+// Hauptschleife: im Spiel ohne Bildraten-Bremse (oder mit gewähltem Limit), sonst Monitor-Takt
+const frameChan = new MessageChannel();
+let nextFrameAt = 0, loopPending = false;
+function render(time) {
   if (screen === 'login') drawLoginBg(time);
   else if (screen === 'lobby' && tab === 'stage') drawStage(time);
   else if (screen === 'game' && inGame) drawGame(time);
 }
-requestAnimationFrame(loop);
+function scheduleFrame() {
+  if (loopPending) return;
+  loopPending = true;
+  const lim = settings.fpsLimit;
+  const fast = screen === 'game' && inGame && !document.hidden && lim >= 0;
+  if (!fast) { requestAnimationFrame(tick); return; }
+  if (lim === 0) { frameChan.port2.postMessage(0); return; } // unbegrenzt
+  const wait = nextFrameAt - performance.now();
+  if (wait > 2) setTimeout(tick, wait - 1.5); else frameChan.port2.postMessage(0);
+}
+function tick() {
+  loopPending = false;
+  const now = performance.now(), lim = settings.fpsLimit;
+  if (screen === 'game' && inGame && lim > 0 && now < nextFrameAt - 0.3) { scheduleFrame(); return; }
+  if (lim > 0) nextFrameAt = Math.max(nextFrameAt + 1000 / lim, now);
+  render(now);
+  scheduleFrame();
+}
+frameChan.port1.onmessage = tick;
+document.addEventListener('visibilitychange', () => { loopPending = false; scheduleFrame(); });
+scheduleFrame();
 updateLevelUi();
 if (!profile.name) showLogin(); else { show('login'); $('loginMsg').textContent = 'Verbinde ...'; }
 connect();

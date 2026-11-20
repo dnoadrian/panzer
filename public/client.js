@@ -97,7 +97,16 @@ function onMsg(m) {
   switch (m.t) {
     case 'welcome':
       loggedIn = true; me.name = m.name; $('btnName').textContent = m.name; $('loginMsg').textContent = '';
+      profile.name = m.name; save('name', m.name); loginMode = 'login';
       if (!inGame) show('lobby');
+      break;
+    case 'nameTaken':
+      // Name gehört gerade jemand anderem -> anderen wählen
+      if (!m.rename) { profile.name = ''; save('name', ''); }
+      loginMode = m.rename ? 'rename' : 'login';
+      showLogin(`Der Name „${m.name}“ ist schon vergeben. Bitte wähle einen anderen.`, m.rename ? 'Speichern' : 'Weiter');
+      $('loginMsg').style.color = '#c0402a';
+      $('nameInput').value = m.name; $('nameInput').select();
       break;
     case 'party': party = m; renderParty(); renderFriends(); break;
     case 'friends':
@@ -153,9 +162,13 @@ function submitName() {
   if (kicked) { kicked = false; $('btnLogin').textContent = 'Weiter'; $('loginMsg').textContent = 'Verbinde ...'; connect(); return; }
   const n = $('nameInput').value.trim();
   if (!n) { $('loginMsg').textContent = 'Bitte gib einen Namen ein.'; $('nameInput').focus(); return; }
-  profile.name = n; save('name', n);
-  if (loginMode === 'rename' && loggedIn) { send({ t: 'rename', name: n }); show('lobby'); loginMode = 'login'; return; }
-  if (ws && ws.readyState === 1) login();
+  $('loginMsg').style.color = '';
+  if (loginMode === 'rename' && loggedIn) {
+    if (n.toLowerCase() === me.name.toLowerCase() && n === me.name) { show('lobby'); loginMode = 'login'; return; }
+    send({ t: 'rename', name: n }); $('loginMsg').textContent = 'Prüfe Namen ...'; return;
+  }
+  profile.name = n;
+  if (ws && ws.readyState === 1) { login(); $('loginMsg').textContent = 'Prüfe Namen ...'; }
   else $('loginMsg').textContent = 'Verbinde ...';
 }
 $('btnLogin').onclick = submitName;

@@ -34,13 +34,13 @@ const BUSH_HP = 1;           // ein Schuss und der Busch ist weg
 const HILL_BLOCK = 0.45;     // so viel höher darf der Hang sein, bevor er eine Kugel schluckt
 const REVEAL = 1.2;          // nach dem Schießen kurz sichtbar (auch im Busch)
 const FAST = process.env.PANZER_FAST === "1" ? 0.12 : 1; // nur zum Testen: Sturm/Bus viel schneller
-// Der Sturm ist ca. 1:30 nach dem Ende des Busflugs komplett zu
+// Ganze Runde ca. 1:30: Bus (3 s Start + 14 s Flug) + Sturm 73 s bis komplett zu
 const ZONE_PHASES = [
-  { wait: 12, shrink: 10, r: 880, dps: 3 },
-  { wait: 10, shrink: 9, r: 520, dps: 5 },
-  { wait: 8, shrink: 8, r: 290, dps: 8 },
-  { wait: 7, shrink: 7, r: 130, dps: 12 },
-  { wait: 6, shrink: 8, r: 0, dps: 18 },
+  { wait: 9, shrink: 8, r: 880, dps: 3 },
+  { wait: 8, shrink: 7, r: 520, dps: 5 },
+  { wait: 7, shrink: 7, r: 290, dps: 8 },
+  { wait: 6, shrink: 6, r: 130, dps: 12 },
+  { wait: 5, shrink: 10, r: 0, dps: 18 },
 ].map(p => ({ ...p, wait: p.wait * FAST, shrink: p.shrink * FAST }));
 const BOT_SKINS = ['rot', 'blau', 'gruen', 'orange', 'lila', 'tuerkis', 'grau', 'pink'];
 const BOT_NAMES = ['Otto', 'Kalle', 'Gerd', 'Franz', 'Heinz', 'Rudi', 'Bruno', 'Lotte', 'Hilde', 'Emil', 'Fritz', 'Greta',
@@ -264,12 +264,20 @@ function makeFriends(a, b) {
   socialDirty = true;
 }
 
+// Name schon vergeben? (Groß-/Kleinschreibung egal; das eigene alte Fenster zählt nicht)
+function nameTaken(name, pid) {
+  const n = name.toLowerCase();
+  return [...byPid.values()].some(o => o.pid !== pid && o.name.toLowerCase() === n);
+}
+
 function login(c, msg) {
   if (c.pid || !validPid(msg.pid)) return;
+  const wanted = cleanName(msg.name);
+  if (nameTaken(wanted, msg.pid)) return send(c, { t: 'nameTaken', name: wanted, rename: false });
   const old = byPid.get(msg.pid);
   if (old) { send(old, { t: 'kicked' }); dropConn(old); try { old.ws.close(); } catch { /* egal */ } }
   c.pid = msg.pid;
-  c.name = uniqueName(cleanName(msg.name), c);
+  c.name = wanted;
   c.skin = cleanSkin(msg.skin);
   c.level = clamp(msg.level | 0, 0, 99);
   c.friends = new Map();
@@ -299,10 +307,13 @@ function handle(c, msg) {
     case 'profile':
       c.skin = cleanSkin(msg.skin); c.level = clamp(msg.level | 0, 0, 99); socialDirty = true;
       break;
-    case 'rename':
-      c.name = uniqueName(cleanName(msg.name), c);
+    case 'rename': {
+      const wanted = cleanName(msg.name);
+      if (nameTaken(wanted, c.pid)) return send(c, { t: 'nameTaken', name: wanted, rename: true });
+      c.name = wanted;
       send(c, { t: 'welcome', pid: c.pid, name: c.name }); socialDirty = true;
       break;
+    }
     case 'friendAdd': {
       const name = cleanName(msg.name).toLowerCase();
       const o = [...byPid.values()].find(x => x.name.toLowerCase() === name);
